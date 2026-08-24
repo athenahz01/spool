@@ -388,63 +388,102 @@ function Threadline({ library, onOpen }: { library: LibraryPayload; onOpen: (thr
   );
 }
 
+function BriefingSourceIndex({
+  captures,
+  onRetry,
+  onAddContext,
+  onTranscribe
+}: {
+  captures: ApiCapture[];
+  onRetry: (capture: ApiCapture) => void;
+  onAddContext: (capture: ApiCapture) => void;
+  onTranscribe: (capture: ApiCapture) => void;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  if (!captures.length) {
+    return <div className="briefing-source-empty"><Inbox size={17} /><span>Your first saved Reel will appear here.</span></div>;
+  }
+
+  return (
+    <div className="briefing-source-index">
+      {captures.slice(0, 5).map((capture) => {
+        const expanded = expandedId === capture.id;
+        const working = capture.status === "queued" || capture.status === "processing";
+        const transcribing = capture.transcriptStatus === "queued" || capture.transcriptStatus === "processing";
+        return <article className={`briefing-source-item status-${capture.status} ${expanded ? "expanded" : ""}`} key={capture.id}>
+          <button className="briefing-source-row" aria-expanded={expanded} onClick={() => setExpandedId(expanded ? null : capture.id)}>
+            <span className="briefing-source-state">{working ? <RefreshCw size={12} className="spin" /> : capture.status === "ready" ? <Check size={12} /> : <AlertCircle size={12} />}</span>
+            <span className="briefing-source-copy">
+              <small>{capture.creator || "New source"}<i />{capture.topic || capture.contentCategory || "Saved Reel"}</small>
+              <strong>{capture.title || "Reading this source…"}</strong>
+            </span>
+            <span className="briefing-source-purpose">{capture.contentCategory || capture.intents?.map((intent) => intentMeta[intent].label).join(" + ") || "Saved"}</span>
+            <ChevronRight size={14} className="briefing-source-chevron" />
+          </button>
+          {expanded ? <div className="briefing-source-detail">
+            <p>{capture.summary || "Spool is still finding the useful idea in this source."}</p>
+            {capture.sharedText ? <span className="briefing-source-reason"><Bookmark size={11} /> {capture.sharedText}</span> : null}
+            <div>
+              {capture.status === "needs-context" ? <button onClick={() => onAddContext(capture)}>Add context</button> : null}
+              {capture.status === "needs-context" || capture.status === "failed" || capture.error ? <button onClick={() => onRetry(capture)}><RefreshCw size={12} /> Retry</button> : null}
+              <button disabled={transcribing} onClick={() => onTranscribe(capture)}>{transcribing ? <RefreshCw size={12} className="spin" /> : capture.transcript ? <FileText size={12} /> : <AudioLines size={12} />}{transcribing ? "Transcribing" : capture.transcript ? "Script ready" : "Transcribe"}</button>
+              <a href={capture.url} target="_blank" rel="noreferrer">Original <ExternalLink size={12} /></a>
+            </div>
+          </div> : null}
+        </article>;
+      })}
+    </div>
+  );
+}
+
 function Briefing({ onNavigate, onOpenThread, library, onRetry, onAddContext, onTranscribe }: { onNavigate: (view: View) => void; onOpenThread: (threadId?: string) => void; library: LibraryPayload; onRetry: (capture: ApiCapture) => void; onAddContext: (capture: ApiCapture) => void; onTranscribe: (capture: ApiCapture) => void }) {
   const [recallRevealed, setRecallRevealed] = useState(false);
-  const nextAction = library.threads[0]?.actions[0];
+  const featuredThread = library.threads[0];
+  const nextAction = featuredThread?.actions[0];
+  const featuredSource = featuredThread ? library.captures.find((capture) => featuredThread.sourceIds.includes(capture.id)) : library.captures[0];
   const today = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric"
   }).format(new Date());
   return (
-    <div className="page briefing-page">
-      <section className="page-intro">
-        <div>
-          <span className="date-line">{today}</span>
-          <h1>Your feed,<br /><em>distilled.</em></h1>
+    <div className="page briefing-page briefing-clean">
+      <header className="briefing-masthead">
+        <div><span className="date-line">{today}</span><h1>Today’s <em>briefing.</em></h1><p>One useful pattern, one next step, then you’re done.</p></div>
+        <div className="briefing-totals"><span><strong>{library.captures.length}</strong><small>saves read</small></span><i /><span><strong>{library.threads.length}</strong><small>patterns found</small></span></div>
+      </header>
+
+      <article className="briefing-feature">
+        <header>
+          <span className="eyebrow"><Sparkles size={12} /> Today’s thread</span>
+          <span className="fresh-badge"><CircleDot size={11} /> {featuredThread?.maturity || "new"}</span>
+        </header>
+        <div className="briefing-feature-grid">
+          <section className="briefing-insight">
+            <span className="briefing-source-line">{featuredSource?.creator || "Your saved sources"}{featuredThread ? ` · ${featuredThread.sourceCount} ${featuredThread.sourceCount === 1 ? "source" : "sources"}` : ""}</span>
+            <h2>{featuredThread?.title || "Your first useful pattern will appear here"}</h2>
+            <p>{featuredThread?.summary || "Save a Reel and Spool will turn it into a short, reusable insight."}</p>
+            {featuredThread?.takeaways.length ? <ul>{featuredThread.takeaways.slice(0, 2).map((takeaway) => <li key={takeaway}><Check size={13} /><span>{takeaway}</span></li>)}</ul> : null}
+            <button className="briefing-thread-link" onClick={() => onOpenThread(featuredThread?.id)}>Explore in Second Brain <ArrowRight size={14} /></button>
+          </section>
+          <aside className="briefing-next-step">
+            <span><Feather size={13} /> Try this next</span>
+            <h3>{nextAction || "Save one Reel you want to act on."}</h3>
+            <p>{nextAction ? "A small experiment drawn directly from today’s pattern." : "Spool will turn the idea into a concrete next step."}</p>
+            <button onClick={() => onOpenThread(featuredThread?.id)}>Open supporting sources <ArrowRight size={13} /></button>
+          </aside>
         </div>
-        <div className="intro-note">
-          <span className="signal-dot" />
-          <p><strong>{library.captures.length ? `${library.captures.length} ${library.captures.length === 1 ? "save" : "saves"} absorbed` : "12 demo saves absorbed"}</strong><br />{library.threads.length ? `${library.threads.length} live ${library.threads.length === 1 ? "pattern is" : "patterns are"} ready to use.` : "3 demo patterns are ready to explore."}</p>
+        <div className="briefing-recall">
+          <span><BookOpen size={13} /><strong>One thing to remember</strong></span>
+          <p>{recallRevealed ? (featuredThread?.takeaways[0] || "Useful ideas become memorable when you turn them into a small action.") : "Can you explain today’s pattern in one sentence?"}</p>
+          <button onClick={() => setRecallRevealed((value) => !value)}>{recallRevealed ? "Hide" : "Show answer"}</button>
         </div>
-      </section>
+      </article>
 
-      <Threadline library={library} onOpen={onOpenThread} />
-
-      <section className="briefing-grid">
-        <article className="use-card">
-          <div className="card-topline">
-            <span className="eyebrow"><Feather size={13} /> Use this next</span>
-            <span className="utility-label">8 min</span>
-          </div>
-          <h2>{nextAction || "Turn one opinion into a public experiment."}</h2>
-          <p>{nextAction ? "This action came directly from the newest pattern in your own saved sources." : "Choose something measurable in your world. Publish the prediction, the reason, and when you will return with the outcome."}</p>
-          <div className="experiment-formula">
-            <span>live event</span><ArrowRight size={14} /><span>your lens</span><ArrowRight size={14} /><span>result later</span>
-          </div>
-          <button className="primary-button" onClick={() => onOpenThread(library.threads[0]?.id)}>Open source thread <ArrowRight size={15} /></button>
-        </article>
-
-        <article className="recall-card">
-          <div className="card-topline">
-            <span className="eyebrow"><BookOpen size={13} /> Recall</span>
-            <span className="utility-label">weekly</span>
-          </div>
-          <div className="recall-number">01</div>
-          <h3>{recallRevealed ? "Because the unresolved outcome creates tension now and a built-in reason to return later." : "Why does publishing a prediction create a natural series?"}</h3>
-          <button className="reveal-button" onClick={() => setRecallRevealed((value) => !value)}>{recallRevealed ? "Hide answer" : "Reveal what you learned"}</button>
-        </article>
-      </section>
-
-      <section className="section-block">
-        <div className="section-heading">
-          <div>
-            <span className="section-kicker">Live inbox</span>
-            <h2>Your recent saves</h2>
-          </div>
-          <button className="text-action" onClick={() => onNavigate("threads")}>See all sources <ArrowRight size={14} /></button>
-        </div>
-        <CaptureInbox captures={library.captures} onRetry={onRetry} onAddContext={onAddContext} onTranscribe={onTranscribe} />
+      <section className="briefing-recent">
+        <header><div><span className="section-kicker">Source index</span><h2>Recently saved</h2><p>Open a row only when you need the details.</p></div><button className="text-action" onClick={() => onNavigate("threads")}>Open Second Brain <ArrowRight size={14} /></button></header>
+        <BriefingSourceIndex captures={library.captures} onRetry={onRetry} onAddContext={onAddContext} onTranscribe={onTranscribe} />
       </section>
     </div>
   );
