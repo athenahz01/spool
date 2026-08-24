@@ -438,52 +438,110 @@ function BriefingSourceIndex({
 }
 
 function Briefing({ onNavigate, onOpenThread, library, onRetry, onAddContext, onTranscribe }: { onNavigate: (view: View) => void; onOpenThread: (threadId?: string) => void; library: LibraryPayload; onRetry: (capture: ApiCapture) => void; onAddContext: (capture: ApiCapture) => void; onTranscribe: (capture: ApiCapture) => void }) {
-  const [recallRevealed, setRecallRevealed] = useState(false);
-  const featuredThread = library.threads[0];
-  const nextAction = featuredThread?.actions[0];
-  const featuredSource = featuredThread ? library.captures.find((capture) => featuredThread.sourceIds.includes(capture.id)) : library.captures[0];
+  const [selectedCategoryId, setSelectedCategoryId] = useState("all");
+  const [sourceIndexOpen, setSourceIndexOpen] = useState(false);
+  const categoryOptions = useMemo<ApiCategory[]>(() => {
+    if (library.categories.length) return library.categories;
+    const grouped = new Map<string, ApiCapture[]>();
+    for (const capture of library.captures) {
+      const category = capture.contentCategory || "Other";
+      grouped.set(category, [...(grouped.get(category) || []), capture]);
+    }
+    return [...grouped.entries()].map(([name, captures]) => ({
+      id: `briefing-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      name,
+      sourceCount: captures.length,
+      sourceIds: captures.map((capture) => capture.id),
+      topics: [...new Set(captures.map((capture) => capture.topic).filter(Boolean) as string[])],
+      summary: captures.length === 1 ? captures[0].summary || "One saved Reel is building this chapter." : `${captures.length} saved Reels are building this chapter.`
+    }));
+  }, [library.captures, library.categories]);
+
+  useEffect(() => {
+    if (selectedCategoryId !== "all" && !categoryOptions.some((category) => category.id === selectedCategoryId)) setSelectedCategoryId("all");
+  }, [categoryOptions, selectedCategoryId]);
+
+  const selectedCategory = categoryOptions.find((category) => category.id === selectedCategoryId);
+  const chapterCaptures = selectedCategory
+    ? library.captures.filter((capture) => selectedCategory.sourceIds.includes(capture.id))
+    : library.captures;
+  const selectedThread = useMemo(() => {
+    if (!library.threads.length) return undefined;
+    if (!selectedCategory) return library.threads[0];
+    const sourceIds = new Set(selectedCategory.sourceIds);
+    const ranked = library.threads
+      .map((thread) => ({ thread, overlap: thread.sourceIds.filter((id) => sourceIds.has(id)).length }))
+      .sort((a, b) => b.overlap - a.overlap);
+    return ranked[0]?.overlap ? ranked[0].thread : undefined;
+  }, [library.threads, selectedCategory]);
+  const supportingCaptures = selectedThread
+    ? chapterCaptures.filter((capture) => selectedThread.sourceIds.includes(capture.id))
+    : chapterCaptures;
+  const visibleSources = (supportingCaptures.length ? supportingCaptures : chapterCaptures).slice(0, 3);
+  const chapterName = selectedCategory?.name || "All highlights";
+  const chapterTitle = selectedThread?.title || (selectedCategory ? `${selectedCategory.name} is becoming a useful chapter.` : "Your first useful pattern will appear here.");
+  const chapterSummary = selectedThread?.summary || selectedCategory?.summary || "Save a Reel and Spool will turn it into a short, reusable insight.";
+  const lessons = selectedThread?.takeaways.slice(0, 2) || selectedCategory?.topics.slice(0, 2).map((topic) => `A saved Reel explored ${topic}.`) || [];
+  const nextAction = selectedThread?.actions[0] || "Save one Reel you want to use, not just remember.";
   const today = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric"
   }).format(new Date());
   return (
-    <div className="page briefing-page briefing-clean">
-      <header className="briefing-masthead">
-        <div><span className="date-line">{today}</span><h1>Today’s <em>briefing.</em></h1><p>One useful pattern, one next step, then you’re done.</p></div>
-        <div className="briefing-totals"><span><strong>{library.captures.length}</strong><small>saves read</small></span><i /><span><strong>{library.threads.length}</strong><small>patterns found</small></span></div>
+    <div className="page briefing-page briefing-chapters">
+      <header className="chapter-masthead">
+        <div>
+          <span className="date-line">{today}</span>
+          <h1>Your day, in <em>chapters.</em></h1>
+          <p>Pick one topic. Ignore the rest until you need it.</p>
+        </div>
+        <div className="chapter-summary" aria-label="Briefing summary">
+          <span><strong>{categoryOptions.length}</strong><small>topics active</small></span>
+          <span><strong>{library.captures.length}</strong><small>saves read</small></span>
+          <span><strong>{library.threads.length}</strong><small>patterns found</small></span>
+        </div>
       </header>
 
-      <article className="briefing-feature">
-        <header>
-          <span className="eyebrow"><Sparkles size={12} /> Today’s thread</span>
-          <span className="fresh-badge"><CircleDot size={11} /> {featuredThread?.maturity || "new"}</span>
-        </header>
-        <div className="briefing-feature-grid">
-          <section className="briefing-insight">
-            <span className="briefing-source-line">{featuredSource?.creator || "Your saved sources"}{featuredThread ? ` · ${featuredThread.sourceCount} ${featuredThread.sourceCount === 1 ? "source" : "sources"}` : ""}</span>
-            <h2>{featuredThread?.title || "Your first useful pattern will appear here"}</h2>
-            <p>{featuredThread?.summary || "Save a Reel and Spool will turn it into a short, reusable insight."}</p>
-            {featuredThread?.takeaways.length ? <ul>{featuredThread.takeaways.slice(0, 2).map((takeaway) => <li key={takeaway}><Check size={13} /><span>{takeaway}</span></li>)}</ul> : null}
-            <button className="briefing-thread-link" onClick={() => onOpenThread(featuredThread?.id)}>Explore in Second Brain <ArrowRight size={14} /></button>
-          </section>
-          <aside className="briefing-next-step">
-            <span><Feather size={13} /> Try this next</span>
-            <h3>{nextAction || "Save one Reel you want to act on."}</h3>
-            <p>{nextAction ? "A small experiment drawn directly from today’s pattern." : "Spool will turn the idea into a concrete next step."}</p>
-            <button onClick={() => onOpenThread(featuredThread?.id)}>Open supporting sources <ArrowRight size={13} /></button>
-          </aside>
-        </div>
-        <div className="briefing-recall">
-          <span><BookOpen size={13} /><strong>One thing to remember</strong></span>
-          <p>{recallRevealed ? (featuredThread?.takeaways[0] || "Useful ideas become memorable when you turn them into a small action.") : "Can you explain today’s pattern in one sentence?"}</p>
-          <button onClick={() => setRecallRevealed((value) => !value)}>{recallRevealed ? "Hide" : "Show answer"}</button>
-        </div>
-      </article>
+      <nav className="chapter-tabs" aria-label="Briefing topics">
+        <button className={selectedCategoryId === "all" ? "active" : ""} aria-pressed={selectedCategoryId === "all"} onClick={() => setSelectedCategoryId("all")}>All highlights</button>
+        {categoryOptions.map((category) => <button key={category.id} className={selectedCategoryId === category.id ? "active" : ""} aria-pressed={selectedCategoryId === category.id} onClick={() => setSelectedCategoryId(category.id)}>{category.name}<span>{category.sourceCount}</span></button>)}
+      </nav>
 
-      <section className="briefing-recent">
-        <header><div><span className="section-kicker">Source index</span><h2>Recently saved</h2><p>Open a row only when you need the details.</p></div><button className="text-action" onClick={() => onNavigate("threads")}>Open Second Brain <ArrowRight size={14} /></button></header>
-        <BriefingSourceIndex captures={library.captures} onRetry={onRetry} onAddContext={onAddContext} onTranscribe={onTranscribe} />
+      <div className="chapter-workspace" key={selectedCategoryId}>
+        <article className="chapter-reading">
+          <div className="chapter-accent" aria-hidden="true" />
+          <span className="chapter-label"><Sparkles size={12} /> {chapterName}</span>
+          <h2>{chapterTitle}</h2>
+          <p>{chapterSummary}</p>
+          {lessons.length ? <div className="chapter-lessons">{lessons.map((lesson, index) => <div className="chapter-lesson" key={lesson}><strong>0{index + 1}</strong><p>{lesson}</p></div>)}</div> : null}
+          <button className="chapter-thread-link" onClick={() => selectedThread ? onOpenThread(selectedThread.id) : onNavigate("threads")}>Open this chapter in Second Brain <ArrowRight size={14} /></button>
+        </article>
+
+        <aside className="chapter-sidebar">
+          <section className="chapter-action">
+            <span><Feather size={13} /> One action</span>
+            <h3>{nextAction}</h3>
+            <p>Spool pulled this from the pattern above.</p>
+            <button onClick={() => selectedThread ? onOpenThread(selectedThread.id) : onNavigate("threads")}>Open the pattern <ArrowRight size={13} /></button>
+          </section>
+          <section className="chapter-supporting" aria-labelledby="supporting-saves-title">
+            <header><span id="supporting-saves-title">Supporting saves</span><small>{visibleSources.length}</small></header>
+            {visibleSources.length ? visibleSources.map((capture) => <a className="chapter-source" href={capture.url} target="_blank" rel="noreferrer" key={capture.id}>
+              <span className="chapter-source-avatar" style={{ "--chapter-source-accent": categoryAccents[capture.contentCategory || "Other"] || categoryAccents.Other } as React.CSSProperties}>{(capture.creator || "S").replace("@", "").slice(0, 2).toUpperCase()}</span>
+              <span><strong>{capture.title || "Reading this source…"}</strong><small>{capture.creator || capture.platform || "Saved source"}</small></span>
+              <ExternalLink size={12} />
+            </a>) : <div className="chapter-empty-source"><Inbox size={16} /><span>Save a Reel to start this chapter.</span></div>}
+          </section>
+        </aside>
+      </div>
+
+      <section className={`chapter-source-index ${sourceIndexOpen ? "open" : ""}`}>
+        <button className="chapter-source-toggle" aria-expanded={sourceIndexOpen} onClick={() => setSourceIndexOpen((open) => !open)}>
+          <span><BookOpen size={14} /><span><strong>All recent saves</strong><small>Transcripts, context, and processing details</small></span></span>
+          <ChevronRight size={15} />
+        </button>
+        {sourceIndexOpen ? <BriefingSourceIndex captures={library.captures} onRetry={onRetry} onAddContext={onAddContext} onTranscribe={onTranscribe} /> : null}
       </section>
     </div>
   );
