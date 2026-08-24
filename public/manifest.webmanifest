@@ -1,0 +1,12 @@
+{
+  "name": "Spool — your feed, distilled",
+  "short_name": "Spool",
+  "description": "Turn the posts you save into knowledge you can use.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f3ed",
+  "theme_color": "#f5f3ed",
+  "icons": [
+    { "src": "/spool-mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
