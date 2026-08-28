@@ -138,13 +138,21 @@ async function fetchSupadata(path, timeoutMs = 48_000) {
   }
 }
 
-async function requestTranscript(sourceUrl) {
+async function requestTranscript(sourceUrl, existingJobId = "", onJobStarted = async () => undefined) {
   if (!process.env.SUPADATA_API_KEY) throw new Error("Supadata is not connected yet.");
-  const query = new URLSearchParams({ url: sourceUrl, text: "true", mode: "auto" });
-  let result = await fetchSupadata(`/v1/transcript?${query.toString()}`);
-  let credits = result.credits;
-  if (result.status === 202 || result.payload?.jobId) {
-    const jobId = result.payload?.jobId;
+  let result;
+  let credits;
+  let jobId = existingJobId;
+  if (jobId) {
+    result = await fetchSupadata(`/v1/transcript/${encodeURIComponent(jobId)}`, 12_000);
+  } else {
+    const query = new URLSearchParams({ url: sourceUrl, text: "true", mode: "auto" });
+    result = await fetchSupadata(`/v1/transcript?${query.toString()}`);
+    credits = result.credits;
+    jobId = result.payload?.jobId || "";
+    if (jobId) await onJobStarted(jobId, credits);
+  }
+  if (result.status === 202 || jobId) {
     if (!jobId) throw new Error("Supadata started a transcript without returning a job ID.");
     const deadline = Date.now() + 44_000;
     while (Date.now() < deadline) {
@@ -154,14 +162,15 @@ async function requestTranscript(sourceUrl) {
       if (status === "failed") throw new Error(result.payload?.error || "Supadata could not transcribe this Reel.");
       if (status === "completed") break;
     }
-    if (result.payload?.status !== "completed") throw new Error("The transcript is still processing. Try again in a moment.");
+    if (result.payload?.status !== "completed") return { pending: true, jobId, credits };
   }
   const transcript = transcriptText(result.payload);
   if (!transcript) throw new Error("No spoken words were detected in this video.");
   return {
     transcript: transcript.slice(0, 40_000),
     language: result.payload?.lang || result.payload?.result?.lang || "",
-    credits
+    credits,
+    jobId
   };
 }
 
@@ -270,10 +279,7 @@ async function analyzeWithAnthropic(capture) {
   if (capture.transcript) contextParts.push(`Spoken-word transcript:\n${capture.transcript}`);
   if (instagramContext?.caption) contextParts.push(`Public Instagram caption from ${instagramContext.creator || "the creator"}:\n${instagramContext.caption}`);
   const suppliedContext = contextParts.join("\n\n") || "None supplied";
-  const response = await client.messages.create({
-    model,
-    max_tokens: 2200,
-    system: [
+  const system = [
       "You turn a shared social-media source into a concise personal knowledge record.",
       `The user explicitly selected these purposes: ${intents.join(", ") || "save only"}.`,
       "The URL was explicitly shared by the user for analysis. Fetch only that source domain.",
@@ -288,26 +294,58 @@ async function analyzeWithAnthropic(capture) {
       "Do not turn the topic or action into a full descriptive sentence.",
       "If the page is inaccessible and shared text is insufficient, return needs-context and say exactly what short note would unblock it.",
       "Do not copy creator wording beyond tiny identifying phrases. Extract structures and patterns instead."
-    ].join(" "),
-    messages: [{
+    ].join(" ");
+  const messages = [{
       role: "user",
       content: `Analyze this saved source.\nURL: ${capture.url}\nCreator hint: ${instagramContext?.creator || capture.creator || "Unknown"}\nShared text: ${suppliedContext}`
-    }],
-    tools: [{
+    }];
+  const webFetchTool = {
       type: "web_fetch_20260318",
       name: "web_fetch",
       max_uses: 1,
       max_content_tokens: 12_000,
       allowed_domains: [sourceDomain],
       response_inclusion: "excluded"
-    }],
-    output_config: {
-      format: { type: "json_schema", schema: analysisSchema }
-    }
+    };
+  const createResponse = (useWebFetch) => client.messages.create({
+    model,
+    max_tokens: 2200,
+    system,
+    messages,
+    ...(useWebFetch ? { tools: [webFetchTool] } : {}),
+    output_config: { format: { type: "json_schema", schema: analysisSchema } }
   });
-  const textBlock = response.content.find((block) => block.type === "text");
-  if (!textBlock) throw new Error("Claude returned no structured analysis");
-  const analysis = JSON.parse(textBlock.text);
+  const parseResponse = (response) => {
+    const text = response.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("\n")
+      .trim();
+    if (!text) throw new Error(`Claude returned no analysis (stop reason: ${response.stop_reason || "unknown"})`);
+    const unfenced = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    const firstBrace = unfenced.indexOf("{");
+    const lastBrace = unfenced.lastIndexOf("}");
+    const candidate = firstBrace >= 0 && lastBrace > firstBrace ? unfenced.slice(firstBrace, lastBrace + 1) : unfenced;
+    return JSON.parse(candidate);
+  };
+
+  const shouldFetch = !capture.transcript && !instagramContext?.caption;
+  let response = await createResponse(shouldFetch);
+  let analysis;
+  try {
+    analysis = parseResponse(response);
+  } catch (firstError) {
+    // A server tool call can consume the first response without leaving a text block.
+    // Retry once from the checkpointed caption/transcript without web fetch.
+    response = await createResponse(false);
+    try {
+      analysis = parseResponse(response);
+    } catch (secondError) {
+      const firstMessage = firstError instanceof Error ? firstError.message : "unknown first response";
+      const secondMessage = secondError instanceof Error ? secondError.message : "unknown retry response";
+      throw new Error(`${secondMessage}; first attempt: ${firstMessage}`);
+    }
+  }
   if (analysis.platform === "Instagram" && analysis.creator && !analysis.creator.startsWith("@") && analysis.creator !== "Instagram creator") {
     analysis.creator = `@${analysis.creator}`;
   }
@@ -328,16 +366,41 @@ async function transcribeCapture(id) {
   if (!capture) return null;
   capture.transcriptStatus = "processing";
   capture.transcriptError = "";
+  capture.transcriptStartedAt = new Date().toISOString();
+  capture.transcriptAttemptCount = Number(capture.transcriptAttemptCount || 0) + 1;
   await upsertCapture(capture);
   try {
-    const result = await requestTranscript(capture.url);
+    const result = await requestTranscript(capture.url, capture.transcriptJobId || "", async (jobId, credits) => {
+      const current = await findCapture(id);
+      if (!current) return;
+      current.transcriptJobId = jobId;
+      if (credits) current.transcriptCredits = credits;
+      current.transcriptJobStartedAt = new Date().toISOString();
+      await upsertCapture(current);
+    });
     capture = await findCapture(id);
     if (!capture) return null;
+    if (result.pending) {
+      capture.transcriptJobId = result.jobId;
+      capture.transcriptStatus = Number(capture.transcriptAttemptCount || 0) >= 4 ? "failed" : "queued";
+      capture.transcriptError = capture.transcriptStatus === "failed"
+        ? "The transcript took too long to finish. Retry the transcript to start a fresh attempt."
+        : "Supadata is still preparing this transcript. Spool will check again automatically.";
+      if (capture.transcriptStatus === "failed") {
+        capture.status = "needs-context";
+        capture.topic = "Transcript needs retry";
+        capture.summary = "The Reel is saved, but its transcript did not finish. Retry the transcript to continue.";
+      }
+      capture.transcriptUpdatedAt = new Date().toISOString();
+      await upsertCapture(capture);
+      return capture;
+    }
     capture.transcript = result.transcript;
     capture.transcriptLanguage = result.language;
     capture.transcriptCredits = result.credits;
     capture.transcriptStatus = "ready";
     capture.transcribedAt = new Date().toISOString();
+    capture.transcriptUpdatedAt = capture.transcribedAt;
     capture.transcriptError = "";
     await upsertCapture(capture);
     return capture;
@@ -346,12 +409,33 @@ async function transcribeCapture(id) {
     if (!capture) return null;
     capture.transcriptStatus = "failed";
     capture.transcriptError = error instanceof Error ? error.message : "Transcription failed";
+    capture.status = "needs-context";
+    capture.topic = /no spoken words/i.test(capture.transcriptError) ? "No speech detected" : "Transcript unavailable";
+    capture.summary = /no spoken words/i.test(capture.transcriptError)
+      ? "This Reel has no detectable spoken words, so there is no script to add to the bank. The Reel remains saved."
+      : "The Reel is saved, but its spoken words could not be transcribed. Retry the transcript to continue.";
+    capture.transcriptUpdatedAt = new Date().toISOString();
     await upsertCapture(capture);
     return capture;
   }
 }
 
-async function processCapture(id, previousReadyCapture = null) {
+function requestOrigin(req) {
+  const forwardedProtocol = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const protocol = forwardedProtocol || (process.env.VERCEL ? "https" : "http");
+  const host = req.headers.host || process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  return host ? `${protocol}://${host}` : "";
+}
+
+async function dispatchContinuation(id, origin) {
+  if (!origin) return;
+  const headers = { "Content-Type": "application/json", "X-Spool-Continuation": "1" };
+  if (process.env.SPOOL_CAPTURE_TOKEN) headers.Authorization = `Bearer ${process.env.SPOOL_CAPTURE_TOKEN}`;
+  const response = await fetch(`${origin}/api/captures/${encodeURIComponent(id)}/continue`, { method: "POST", headers });
+  if (!response.ok) throw new Error(`Could not continue processing (${response.status})`);
+}
+
+async function processCapture(id, previousReadyCapture = null, origin = "") {
   let capture = await findCapture(id);
   if (!capture) return;
   const intents = intentsForCapture(capture);
@@ -359,24 +443,37 @@ async function processCapture(id, previousReadyCapture = null) {
   const wantsKnowledge = intents.includes("knowledge");
 
   if (wantsScript && !capture.transcript) {
-    await transcribeCapture(id);
-    capture = await findCapture(id);
+    if (capture.transcriptStatus === "failed") return;
+    capture = await transcribeCapture(id);
+    if (capture?.transcriptStatus === "queued" || capture?.transcriptStatus === "ready") await dispatchContinuation(id, origin);
+    return;
+  }
+
+  if (wantsKnowledge && !capture.transcript && capture.transcriptRecommended && (capture.transcriptStatus === "queued" || capture.transcriptStatus === "processing")) {
+    capture = await transcribeCapture(id);
+    if (capture?.transcriptStatus === "queued" || capture?.transcriptStatus === "ready") await dispatchContinuation(id, origin);
+    return;
   }
 
   await enrichCapture(id, previousReadyCapture);
   capture = await findCapture(id);
-  if (!capture || wantsScript || !wantsKnowledge || capture.transcript || capture.sourceCoverage === "complete") return;
+  if (!capture || capture.status === "failed" || capture.status === "ready" || !wantsKnowledge || capture.transcript || capture.sourceCoverage === "complete") return;
 
   if (!capture.transcriptRecommended || !process.env.SUPADATA_API_KEY) return;
-  await transcribeCapture(id);
-  capture = await findCapture(id);
-  if (capture?.transcriptStatus === "ready" && capture.transcript) await enrichCapture(id, previousReadyCapture);
+  capture.transcriptStatus = "queued";
+  capture.transcriptError = "";
+  capture.status = "processing";
+  capture.summary = "The caption does not contain the lesson. Spool is reading the spoken words next.";
+  await upsertCapture(capture);
+  await dispatchContinuation(id, origin);
 }
 
 async function enrichCapture(id, previousReadyCapture = null) {
   let capture = await findCapture(id);
-  if (!capture) return;
+  if (!capture) return null;
   capture.status = "processing";
+  capture.processingStartedAt = new Date().toISOString();
+  capture.processingStage = capture.transcript ? "analysis-from-transcript" : "analysis-from-source";
   await upsertCapture(capture);
   let analysis;
   try {
@@ -386,11 +483,13 @@ async function enrichCapture(id, previousReadyCapture = null) {
     analysis = {
       ...sourceFromUrl(capture.url),
       title: capture.title === "Reading the source…" ? "Saved source" : capture.title,
-      topic: "Processing issue",
-      summary: "Claude could not process this source. Check the connection in iPhone setup, then retry.",
+      topic: "Analysis needs retry",
+      summary: capture.transcript
+        ? "The transcript is safe, but Claude could not finish organizing it. Retry analysis—no new transcript credits are needed."
+        : "Claude could not finish this note. Retry analysis, or add context if Instagram blocked the source.",
       takeaways: [],
-      hook: "",
-      structure: "",
+      hook: capture.hook || "",
+      structure: capture.structure || "",
       action: "",
       confidence: 0,
       status: "failed",
@@ -407,13 +506,60 @@ async function enrichCapture(id, previousReadyCapture = null) {
       lastRetrySummary: analysis.summary,
       lastRetryError: analysis.error || ""
     });
-    return;
+    return previousReadyCapture;
   }
   capture = await findCapture(id);
-  if (!capture) return;
+  if (!capture) return null;
   Object.assign(capture, analysis);
   capture.processedAt = new Date().toISOString();
+  capture.processingStage = "complete";
+  capture.analysisInput = capture.transcript ? "transcript" : "source";
+  capture.analysisTranscriptAt = capture.transcript ? capture.transcribedAt || capture.transcriptUpdatedAt || capture.processedAt : "";
   await upsertCapture(capture);
+  return capture;
+}
+
+function timestampAge(value) {
+  const timestamp = Date.parse(value || "");
+  return Number.isFinite(timestamp) ? Date.now() - timestamp : Number.POSITIVE_INFINITY;
+}
+
+function isStaleCapture(capture) {
+  if (capture.status !== "processing" && capture.status !== "queued") return false;
+  return timestampAge(capture.processingStartedAt || capture.capturedAt) > 5 * 60_000;
+}
+
+function isStaleTranscript(capture) {
+  if (capture.transcriptStatus !== "processing" && capture.transcriptStatus !== "queued") return false;
+  return timestampAge(capture.transcriptStartedAt || capture.transcriptUpdatedAt || capture.capturedAt) > 5 * 60_000;
+}
+
+async function prepareStaleRepairs() {
+  const captures = await readCaptures();
+  const repaired = [];
+  for (const capture of captures) {
+    const staleAnalysis = isStaleCapture(capture);
+    const staleTranscript = isStaleTranscript(capture);
+    const recoveryCount = Number(capture.recoveryCount || 0);
+    const recoverableAnalysis = capture.status === "failed" && capture.provider === "anthropic" && recoveryCount < 2;
+    const recoverableTranscript = capture.transcriptStatus === "failed" && recoveryCount < 2 && /aborted|too long|timed out|timeout/i.test(capture.transcriptError || "");
+    if (!staleAnalysis && !staleTranscript && !recoverableAnalysis && !recoverableTranscript) continue;
+    if (staleTranscript || recoverableTranscript) {
+      capture.transcriptStatus = "queued";
+      capture.transcriptError = capture.transcriptJobId
+        ? "Resuming the existing transcript job."
+        : "The earlier transcript job stopped before saving its result. Retrying now.";
+    }
+    if (staleAnalysis || recoverableAnalysis) {
+      capture.status = "queued";
+      delete capture.error;
+    }
+    capture.recoveredAt = new Date().toISOString();
+    capture.recoveryCount = Number(capture.recoveryCount || 0) + 1;
+    await upsertCapture(capture);
+    repaired.push(capture.id);
+  }
+  return repaired;
 }
 
 function buildLibrary(captures) {
@@ -517,6 +663,7 @@ function buildLibrary(captures) {
 }
 
 export async function handleApi(req, res, pathname, schedule = (work) => void work) {
+  const origin = requestOrigin(req);
   if (req.method === "OPTIONS") return json(res, 204, {});
   if (pathname === "/api/health" && req.method === "GET") {
     const captures = await readCaptures();
@@ -550,6 +697,12 @@ export async function handleApi(req, res, pathname, schedule = (work) => void wo
     captures.sort((a, b) => String(b.capturedAt).localeCompare(String(a.capturedAt)));
     return json(res, 200, buildLibrary(captures));
   }
+  if (pathname === "/api/repair" && req.method === "POST") {
+    const repaired = await prepareStaleRepairs();
+    json(res, 202, { repaired: repaired.length, ids: repaired });
+    for (const id of repaired) schedule(dispatchContinuation(id, origin));
+    return;
+  }
   if (pathname === "/api/capture" && req.method === "POST") {
     if (!captureAuthorized(req)) return json(res, 401, { error: "Invalid capture token" });
     try {
@@ -578,7 +731,7 @@ export async function handleApi(req, res, pathname, schedule = (work) => void wo
       };
       await upsertCapture(capture);
       json(res, saveOnly ? 200 : 202, capture);
-      if (!saveOnly) schedule(processCapture(capture.id));
+      if (!saveOnly) schedule(processCapture(capture.id, null, origin));
       return;
     } catch (error) {
       return json(res, 400, { error: error instanceof Error ? error.message : "Could not capture link" });
@@ -605,7 +758,7 @@ export async function handleApi(req, res, pathname, schedule = (work) => void wo
       }
       await upsertCapture(capture);
       json(res, 200, capture);
-      if (body.reprocess === true) schedule(processCapture(capture.id, previousReadyCapture));
+      if (body.reprocess === true) schedule(processCapture(capture.id, previousReadyCapture, origin));
       return;
     } catch (error) {
       return json(res, 400, { error: error instanceof Error ? error.message : "Could not update capture" });
@@ -617,11 +770,30 @@ export async function handleApi(req, res, pathname, schedule = (work) => void wo
     const capture = await findCapture(retryMatch[1]);
     if (!capture) return json(res, 404, { error: "Capture not found" });
     const previousReadyCapture = capture.status === "ready" ? { ...capture } : null;
+    if (!capture.transcript && capture.transcriptStatus === "failed") {
+      capture.transcriptStatus = "queued";
+      capture.transcriptJobId = "";
+      capture.transcriptAttemptCount = 0;
+      capture.transcriptError = "";
+    }
     capture.status = "queued";
     delete capture.error;
+    if (!capture.transcript && (capture.transcriptStatus === "processing" || capture.transcriptStatus === "queued")) {
+      capture.transcriptStatus = "queued";
+    }
     await upsertCapture(capture);
     json(res, 202, capture);
-    schedule(processCapture(capture.id, previousReadyCapture));
+    schedule(processCapture(capture.id, previousReadyCapture, origin));
+    return;
+  }
+
+  const continueMatch = pathname.match(/^\/api\/captures\/([^/]+)\/continue$/);
+  if (continueMatch && req.method === "POST") {
+    if (!captureAuthorized(req)) return json(res, 401, { error: "Invalid continuation token" });
+    const capture = await findCapture(continueMatch[1]);
+    if (!capture) return json(res, 404, { error: "Capture not found" });
+    json(res, 202, { id: capture.id, stage: capture.processingStage || capture.transcriptStatus || capture.status });
+    schedule(processCapture(capture.id, null, origin));
     return;
   }
 
@@ -630,15 +802,20 @@ export async function handleApi(req, res, pathname, schedule = (work) => void wo
     if (!process.env.SUPADATA_API_KEY) return json(res, 503, { error: "Connect a Supadata API key before spending transcript credits." });
     const capture = await findCapture(transcriptMatch[1]);
     if (!capture) return json(res, 404, { error: "Capture not found" });
-    if (capture.transcriptStatus === "processing" || capture.transcriptStatus === "queued") return json(res, 202, capture);
+    if ((capture.transcriptStatus === "processing" || capture.transcriptStatus === "queued") && !isStaleTranscript(capture)) return json(res, 202, capture);
     if (capture.transcript) return json(res, 200, capture);
     const previousReadyCapture = capture.status === "ready" ? { ...capture } : null;
+    const restartTranscript = capture.transcriptStatus === "failed";
     capture.intents = [...new Set([...intentsForCapture(capture), "script"])];
     capture.transcriptStatus = "queued";
     capture.transcriptError = "";
+    if (restartTranscript) {
+      capture.transcriptJobId = "";
+      capture.transcriptAttemptCount = 0;
+    }
     await upsertCapture(capture);
     json(res, 202, capture);
-    schedule(processCapture(capture.id, previousReadyCapture));
+    schedule(processCapture(capture.id, previousReadyCapture, origin));
     return;
   }
   return json(res, 404, { error: "Not found" });

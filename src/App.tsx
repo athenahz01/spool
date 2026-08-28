@@ -182,10 +182,23 @@ function captureAsSource(capture: ApiCapture): Source {
   };
 }
 
+function captureStatusCopy(capture: ApiCapture) {
+  const transcriptWorking = capture.transcriptStatus === "queued" || capture.transcriptStatus === "processing";
+  if (transcriptWorking) return "Reading the spoken words. Spool will continue automatically, even if you leave this page.";
+  if (capture.transcriptStatus === "failed") {
+    if (/no spoken words/i.test(capture.transcriptError || "")) return "No speech was detected. This Reel stays saved, but it cannot create a script.";
+    return "The transcript did not finish. Retry the transcript to continue.";
+  }
+  if (capture.status === "failed" && /401|authentication_error|api key is invalid/i.test(capture.error || "")) return "Anthropic rejected the API key. Replace it in Vercel, then retry analysis.";
+  if (capture.status === "failed" && capture.transcript) return "The transcript is safe. Retry analysis to organize it—this will not spend more transcript credits.";
+  if (capture.status === "failed") return "Claude could not organize this source. Retry analysis, or add context if Instagram blocked it.";
+  return capture.summary || "Spool is finding the durable idea and reusable structure.";
+}
+
 const navItems: Array<{ id: View; label: string; icon: typeof Compass; count?: number }> = [
   { id: "briefing", label: "Briefing", icon: Compass },
   { id: "threads", label: "Knowledge", icon: Layers3, count: navCounts.threads },
-  { id: "scripts", label: "Scripts", icon: AudioLines },
+  { id: "scripts", label: "Banks", icon: AudioLines },
   { id: "creators", label: "Creators", icon: UsersRound, count: navCounts.creators },
   { id: "setup", label: "iPhone capture", icon: Share2 }
 ];
@@ -252,7 +265,7 @@ function Header({ active, onCapture }: { active: View; onCapture: () => void }) 
   const titles: Record<View, string> = {
     briefing: "Briefing",
     threads: "Knowledge graph",
-    scripts: "Script bank",
+    scripts: "Hook & script banks",
     creators: "Creator notes",
     setup: "iPhone capture"
   };
@@ -335,7 +348,7 @@ function CaptureInbox({
             <div className="capture-row-copy">
               <div><small>{capture.creator || "New source"}</small><span>{capture.topic || "Inbox"}</span></div>
               <strong>{capture.title || "Reading the source…"}</strong>
-              <p>{capture.status === "failed" && /401|authentication_error|api key is invalid/i.test(capture.error || "") ? "Anthropic rejected the API key. Replace it in Spool’s environment file, restart, then retry." : capture.summary || "Claude is finding the durable idea and reusable structure."}</p>
+              <p>{captureStatusCopy(capture)}</p>
               <span className="capture-intents" aria-label="Save purposes">
                 {capture.intents?.length ? capture.intents.map((intent) => {
                   const IntentIcon = intentMeta[intent].icon;
@@ -346,7 +359,7 @@ function CaptureInbox({
             </div>
             <div className="capture-row-actions">
               {capture.status === "needs-context" ? <button onClick={() => onAddContext(capture)}>Add context</button> : null}
-              {capture.status === "needs-context" || capture.status === "failed" || capture.error ? <button aria-label="Retry processing" onClick={() => onRetry(capture)}><RefreshCw size={14} /></button> : null}
+              {capture.status === "needs-context" || capture.status === "failed" || capture.error ? <button aria-label={capture.transcript ? "Retry analysis" : "Retry processing"} title={capture.transcript ? "Retry analysis without retranscribing" : "Retry processing"} onClick={() => onRetry(capture)}><RefreshCw size={14} /></button> : null}
               {capture.transcript ? (
                 <button className="transcript-control ready" aria-expanded={transcriptOpen} onClick={() => setOpenTranscript(transcriptOpen ? null : capture.id)}><FileText size={14} /><span>{transcriptOpen ? "Hide script" : "Script"}</span></button>
               ) : (
@@ -452,11 +465,11 @@ function BriefingSourceIndex({
             <ChevronRight size={14} className="briefing-source-chevron" />
           </button>
           {expanded ? <div className="briefing-source-detail">
-            <p>{capture.summary || "Spool is still finding the useful idea in this source."}</p>
+            <p>{captureStatusCopy(capture)}</p>
             {capture.sharedText ? <span className="briefing-source-reason"><Bookmark size={11} /> {capture.sharedText}</span> : null}
             <div>
               {capture.status === "needs-context" ? <button onClick={() => onAddContext(capture)}>Add context</button> : null}
-              {capture.status === "needs-context" || capture.status === "failed" || capture.error ? <button onClick={() => onRetry(capture)}><RefreshCw size={12} /> Retry</button> : null}
+              {capture.status === "needs-context" || capture.status === "failed" || capture.error ? <button onClick={() => onRetry(capture)}><RefreshCw size={12} /> {capture.transcript ? "Retry analysis" : "Retry"}</button> : null}
               <button disabled={transcribing} onClick={() => onTranscribe(capture)}>{transcribing ? <RefreshCw size={12} className="spin" /> : capture.transcript ? <FileText size={12} /> : <AudioLines size={12} />}{transcribing ? "Transcribing" : capture.transcript ? "Script ready" : "Transcribe"}</button>
               <a href={capture.url} target="_blank" rel="noreferrer">Original <ExternalLink size={12} /></a>
             </div>
@@ -1136,6 +1149,23 @@ function transcriptHook(capture: ApiCapture) {
   return opening ? `${opening}${/[.!?]$/.test(opening) ? "" : "."}` : "Opening line not detected.";
 }
 
+function hookPattern(capture: ApiCapture) {
+  const hook = transcriptHook(capture).toLowerCase();
+  if (hook.includes("?")) return "Question";
+  if (/\b(how to|here'?s how|steps?|ways?|tips?)\b/.test(hook)) return "How-to";
+  if (/\b(stop|don'?t|never|wrong|mistake|instead|nobody|myth)\b/.test(hook)) return "Contrarian";
+  if (/\b(i built|i made|we built|result|grew|earned|landed|from .+ to|in \d+ days?)\b/.test(hook)) return "Proof";
+  if (/\b(first|today|when i|last year|story|day in my life)\b/.test(hook)) return "Story";
+  if (/\b(\d+|three|four|five|top)\b/.test(hook)) return "List";
+  return "Curiosity";
+}
+
+function reusableScriptShape(capture: ApiCapture) {
+  const steps = capture.structure?.split(/→|->/).map((step) => step.trim()).filter(Boolean) || [];
+  if (steps.length) return `${hookPattern(capture)} opening → ${steps.join(" → ")}`;
+  return `${hookPattern(capture)} opening → explain the tension → show proof or process → land one clear takeaway`;
+}
+
 function transcriptParagraphs(transcript: string) {
   const sentences = transcript.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((sentence) => sentence.trim()).filter(Boolean) || [transcript];
   const paragraphs: string[] = [];
@@ -1154,21 +1184,24 @@ function ScriptBankView({ library }: { library: LibraryPayload }) {
   const [mode, setMode] = useState<"hooks" | "scripts">("hooks");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
+  const [pattern, setPattern] = useState("All patterns");
   const [selectedId, setSelectedId] = useState("");
   const [copiedKey, setCopiedKey] = useState("");
   const categories = useMemo(() => ["All", ...new Set(scripts.map((capture) => capture.contentCategory || "Other"))], [scripts]);
+  const patterns = useMemo(() => ["All patterns", ...new Set(scripts.map(hookPattern))], [scripts]);
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return scripts.filter((capture) => {
       const categoryMatches = category === "All" || (capture.contentCategory || "Other") === category;
+      const patternMatches = pattern === "All patterns" || hookPattern(capture) === pattern;
       const searchMatches = !normalized || [capture.title, capture.creator, capture.contentCategory, capture.hook, capture.structure, capture.transcript]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
         .includes(normalized);
-      return categoryMatches && searchMatches;
+      return categoryMatches && patternMatches && searchMatches;
     });
-  }, [category, query, scripts]);
+  }, [category, pattern, query, scripts]);
 
   useEffect(() => {
     if (!filtered.length) return setSelectedId("");
@@ -1193,8 +1226,8 @@ function ScriptBankView({ library }: { library: LibraryPayload }) {
       <header className="script-bank-masthead">
         <div>
           <span className="date-line">Your creation library</span>
-          <h1>Script <em>bank.</em></h1>
-          <p>Find the words that made you stop scrolling. Copy the useful part and make it yours.</p>
+          <h1>Creation <em>banks.</em></h1>
+          <p>Find the opening that made you stop, study the full delivery, then reuse the shape in your own voice.</p>
         </div>
         <div className="script-bank-stats" aria-label="Script bank summary">
           <span><strong>{scripts.length}</strong> scripts</span><i /><span><strong>{scripts.length}</strong> hooks</span><i /><span><strong>{creatorCount}</strong> creators</span>
@@ -1213,6 +1246,11 @@ function ScriptBankView({ library }: { library: LibraryPayload }) {
         {categories.map((item) => <button key={item} className={category === item ? "active" : ""} aria-pressed={category === item} onClick={() => setCategory(item)}>{item}</button>)}
       </nav>
 
+      {mode === "hooks" ? <nav className="bank-patterns" aria-label="Filter by hook pattern">
+        <span>Opening pattern</span>
+        {patterns.map((item) => <button key={item} className={pattern === item ? "active" : ""} aria-pressed={pattern === item} onClick={() => setPattern(item)}>{item}</button>)}
+      </nav> : null}
+
       {!scripts.length ? <section className="bank-empty"><AudioLines size={20} /><h2>Your first script will appear here.</h2><p>Save a Reel with the Script label, or transcribe one from Knowledge.</p></section> : !filtered.length ? <section className="bank-empty"><Search size={20} /><h2>No matching scripts.</h2><p>Try another word or knowledge area.</p></section> : mode === "hooks" ? <section className="hook-ledger" aria-label="Saved hooks">
         {filtered.map((capture, index) => {
           const hook = transcriptHook(capture);
@@ -1220,7 +1258,7 @@ function ScriptBankView({ library }: { library: LibraryPayload }) {
           return <article className="hook-entry" key={capture.id}>
             <aside><span>{String(index + 1).padStart(2, "0")}</span><small>{capture.contentCategory || "Other"}</small></aside>
             <div>
-              <div className="hook-source"><span>{capture.creator || "Unknown creator"}</span><i />{capture.title || "Saved Reel"}</div>
+              <div className="hook-source"><span>{capture.creator || "Unknown creator"}</span><i />{capture.title || "Saved Reel"}<b>{hookPattern(capture)}</b></div>
               <blockquote>“{hook}”</blockquote>
               <div className="hook-actions">
                 <button className={copied ? "copied" : ""} onClick={() => void copyToClipboard(hook, `hook-${capture.id}`)}><Copy size={12} />{copied ? "Hook copied" : "Copy hook"}</button>
@@ -1262,6 +1300,7 @@ function ScriptBankView({ library }: { library: LibraryPayload }) {
 
               <section className="script-hook-line"><small>Hook</small><blockquote>“{transcriptHook(selected)}”</blockquote></section>
               {structure.length ? <section className="script-map"><small>Script map</small><div>{structure.slice(0, 8).map((step, index) => <span key={`${step}-${index}`}><i>{String(index + 1).padStart(2, "0")}</i>{step}</span>)}</div></section> : null}
+              <section className="script-template"><small>Make it yours</small><p>{reusableScriptShape(selected)}</p><button className={copiedKey === `shape-${selected.id}` ? "copied" : ""} onClick={() => void copyToClipboard(reusableScriptShape(selected), `shape-${selected.id}`)}><Copy size={11} />{copiedKey === `shape-${selected.id}` ? "Shape copied" : "Copy reusable shape"}</button></section>
               <section className="script-body"><small>Full transcript</small><div className="transcript-margin-rail">{paragraphs.map((paragraph, index) => <p key={`${paragraph.slice(0, 20)}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span>{paragraph}</p>)}</div></section>
             </>;
           })()}
@@ -1578,7 +1617,17 @@ export default function App() {
   };
 
   useEffect(() => {
-    void refreshLibrary();
+    void (async () => {
+      await refreshLibrary();
+      const repairResponse = await fetch("/api/repair", { method: "POST" }).catch(() => null);
+      if (repairResponse?.ok) {
+        const result = await repairResponse.json() as { repaired?: number };
+        if (result.repaired) {
+          setToast(`Repairing ${result.repaired} unfinished ${result.repaired === 1 ? "save" : "saves"}.`);
+          await refreshLibrary();
+        }
+      }
+    })();
     fetch("/api/health")
       .then((response) => response.ok ? response.json() : null)
       .then((result: ApiHealth | null) => setHealth(result))

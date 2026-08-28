@@ -38,16 +38,17 @@ Spool, saved Reels, fragments, threads, chapters, patterns, supporting saves, cr
 - Signature: a baby-blue-to-butter vertical chapter spine visibly connects synthesized knowledge back to the Reel evidence.
 - Keep guide reading immersive on desktop while preserving the category library at left; on iPhone, keep the category rail above the reader and avoid adding another primary tab.
 
-## Current creation direction — Script Bank
+## Current creation direction — Creation Banks
 
-- Script Bank is a daily creation workspace, separate from Second Brain learning but powered by the same saved captures.
-- Content hierarchy: `Script Bank → Hooks / Scripts → Category filter → Source Reel`.
+- Creation Banks are a daily creation workspace, separate from Second Brain learning but powered by the same saved captures.
+- Content hierarchy: `Creation Banks → Hook Bank / Script Bank → Category + opening-pattern filters → Source Reel`.
 - Hooks use the analyzed opening line, falling back to the transcript's first spoken sentence; Scripts only include completed transcripts.
 - Hook view is a quiet numbered ledger for fast scanning and one-tap copying, not a card gallery.
+- Hook patterns are practical labels—Question, How-to, Contrarian, Proof, Story, List, Curiosity—derived locally without another API call.
 - Script view uses a master-detail notebook: transcribed-source index at left, readable script at right, and a baby-blue-to-butter transcript margin rail.
-- Every script shows its hook, structural map, word count, estimated spoken length, complete transcript, and original Reel.
+- Every script shows its hook, structural map, reusable shape, word count, estimated spoken length, complete transcript, and original Reel.
 - Browsing and copying must never trigger Claude or Supadata usage.
-- On iPhone, primary navigation is `Briefing / Knowledge / Scripts / Creators`; one-time iPhone setup remains in the top-right utility button.
+- On iPhone, primary navigation is `Briefing / Knowledge / Banks / Creators`; one-time iPhone setup remains in the top-right utility button.
 
 ## Reserved Briefing direction — Focus Queue
 

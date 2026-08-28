@@ -18,6 +18,9 @@ Spool turns explicitly shared Instagram Reels, creator profiles, YouTube videos,
 - Save-only capture that skips both Claude and Supadata
 - Retry protection that preserves a successful note if Instagram later blocks access
 - Selective Supadata transcription: always for Script, automatic fallback for incomplete Knowledge, or manual “Transcribe”
+- Resumable Vercel processing: transcript jobs checkpoint their Supadata job ID and hand Claude analysis to a fresh function invocation
+- Automatic repair for stale jobs, with distinct transcript, source-access, and Claude-analysis recovery messages
+- Hook and Script banks with category search, opening-pattern filters, reusable script shapes, and zero-cost browsing/copying
 - A complete in-app Shortcut setup recipe at `/shortcut-setup.html`
 - Demo mode that works without credentials
 
