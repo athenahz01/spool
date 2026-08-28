@@ -467,11 +467,13 @@ function buildLibrary(captures) {
 
   const categories = [...byCategory.entries()].map(([name, sources]) => {
     const topics = [...new Set(sources.map((source) => source.topic).filter(Boolean))].slice(0, 8);
-    const principles = [...new Set(sources.flatMap((source) => source.takeaways || []).filter(Boolean))].slice(0, 10);
+    const balancedPrinciples = sources.flatMap((source) => (source.takeaways || []).slice(0, 2));
+    const allPrinciples = sources.flatMap((source) => source.takeaways || []);
+    const principles = [...new Set([...balancedPrinciples, ...allPrinciples].filter(Boolean))].slice(0, 10);
     const playbook = [...new Set(sources.map((source) => source.action).filter(Boolean))].slice(0, 7);
     const guideSummary = sources.length === 1
       ? sources[0].summary
-      : `${sources.length} saved Reels now form a practical guide to ${name.toLowerCase()}: what matters, how people approach it, and what you can try next.`;
+      : `${sources.length} saved Reels now form a practical ${name} guide: what matters, how people approach it, and what you can try next.`;
     const guideWords = sources.reduce((total, source) => total + [source.summary, source.structure, ...(source.takeaways || [])]
       .filter(Boolean)
       .join(" ")
