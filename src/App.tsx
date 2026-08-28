@@ -9,6 +9,7 @@ import {
   Check,
   ChevronRight,
   CircleDot,
+  Copy,
   Compass,
   ExternalLink,
   Feather,
@@ -25,6 +26,7 @@ import {
   Settings2,
   Share2,
   Sparkles,
+  Quote,
   UserRound,
   UsersRound,
   Wifi,
@@ -32,7 +34,7 @@ import {
 } from "lucide-react";
 import { creators, navCounts, sources, type Source } from "./data";
 
-type View = "briefing" | "threads" | "creators" | "setup";
+type View = "briefing" | "threads" | "scripts" | "creators" | "setup";
 type CaptureIntent = "knowledge" | "script" | "creator";
 type ApiCapture = {
   id: string;
@@ -183,6 +185,7 @@ function captureAsSource(capture: ApiCapture): Source {
 const navItems: Array<{ id: View; label: string; icon: typeof Compass; count?: number }> = [
   { id: "briefing", label: "Briefing", icon: Compass },
   { id: "threads", label: "Knowledge", icon: Layers3, count: navCounts.threads },
+  { id: "scripts", label: "Scripts", icon: AudioLines },
   { id: "creators", label: "Creators", icon: UsersRound, count: navCounts.creators },
   { id: "setup", label: "iPhone capture", icon: Share2 }
 ];
@@ -196,7 +199,7 @@ function SpoolMark() {
   );
 }
 
-function Sidebar({ active, onNavigate, onCapture, liveThreadCount, liveCreatorCount }: { active: View; onNavigate: (view: View) => void; onCapture: () => void; liveThreadCount: number; liveCreatorCount: number }) {
+function Sidebar({ active, onNavigate, onCapture, liveThreadCount, liveScriptCount, liveCreatorCount }: { active: View; onNavigate: (view: View) => void; onCapture: () => void; liveThreadCount: number; liveScriptCount: number; liveCreatorCount: number }) {
   return (
     <aside className="sidebar">
       <div className="brand-row">
@@ -208,7 +211,7 @@ function Sidebar({ active, onNavigate, onCapture, liveThreadCount, liveCreatorCo
         <p className="nav-label">Your library</p>
         {navItems.map((item) => {
           const Icon = item.icon;
-          const count = item.id === "threads" ? liveThreadCount || navCounts.threads : item.id === "creators" ? navCounts.creators + liveCreatorCount : item.count;
+          const count = item.id === "threads" ? liveThreadCount || navCounts.threads : item.id === "scripts" ? liveScriptCount : item.id === "creators" ? navCounts.creators + liveCreatorCount : item.count;
           return (
             <button
               key={item.id}
@@ -249,6 +252,7 @@ function Header({ active, onCapture }: { active: View; onCapture: () => void }) 
   const titles: Record<View, string> = {
     briefing: "Briefing",
     threads: "Knowledge graph",
+    scripts: "Script bank",
     creators: "Creator notes",
     setup: "iPhone capture"
   };
@@ -1125,6 +1129,147 @@ function ThreadsView({ library, onTranscribe }: { library: LibraryPayload; onTra
   );
 }
 
+function transcriptHook(capture: ApiCapture) {
+  if (capture.hook?.trim()) return capture.hook.trim();
+  const opening = capture.transcript?.match(/^(.{1,220}?)(?:[.!?](?:\s|$)|$)/)?.[1]?.trim();
+  return opening ? `${opening}${/[.!?]$/.test(opening) ? "" : "."}` : "Opening line not detected.";
+}
+
+function transcriptParagraphs(transcript: string) {
+  const sentences = transcript.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((sentence) => sentence.trim()).filter(Boolean) || [transcript];
+  const paragraphs: string[] = [];
+  for (let index = 0; index < sentences.length; index += 3) paragraphs.push(sentences.slice(index, index + 3).join(" "));
+  return paragraphs;
+}
+
+function spokenLength(transcript: string) {
+  const words = transcript.trim().split(/\s+/).filter(Boolean).length;
+  const seconds = Math.max(1, Math.round(words / 2.5));
+  return { words, label: seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s` };
+}
+
+function ScriptBankView({ library }: { library: LibraryPayload }) {
+  const scripts = useMemo(() => library.captures.filter((capture) => capture.transcript?.trim() && capture.transcriptStatus === "ready"), [library.captures]);
+  const [mode, setMode] = useState<"hooks" | "scripts">("hooks");
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("All");
+  const [selectedId, setSelectedId] = useState("");
+  const [copiedKey, setCopiedKey] = useState("");
+  const categories = useMemo(() => ["All", ...new Set(scripts.map((capture) => capture.contentCategory || "Other"))], [scripts]);
+  const filtered = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return scripts.filter((capture) => {
+      const categoryMatches = category === "All" || (capture.contentCategory || "Other") === category;
+      const searchMatches = !normalized || [capture.title, capture.creator, capture.contentCategory, capture.hook, capture.structure, capture.transcript]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(normalized);
+      return categoryMatches && searchMatches;
+    });
+  }, [category, query, scripts]);
+
+  useEffect(() => {
+    if (!filtered.length) return setSelectedId("");
+    if (!filtered.some((capture) => capture.id === selectedId)) setSelectedId(filtered[0].id);
+  }, [filtered, selectedId]);
+
+  const selected = filtered.find((capture) => capture.id === selectedId) || filtered[0];
+  const creatorCount = new Set(scripts.map((capture) => capture.creator).filter(Boolean)).size;
+
+  const copyToClipboard = async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      window.setTimeout(() => setCopiedKey((current) => current === key ? "" : current), 1800);
+    } catch {
+      setCopiedKey("");
+    }
+  };
+
+  return (
+    <div className="page script-bank-page">
+      <header className="script-bank-masthead">
+        <div>
+          <span className="date-line">Your creation library</span>
+          <h1>Script <em>bank.</em></h1>
+          <p>Find the words that made you stop scrolling. Copy the useful part and make it yours.</p>
+        </div>
+        <div className="script-bank-stats" aria-label="Script bank summary">
+          <span><strong>{scripts.length}</strong> scripts</span><i /><span><strong>{scripts.length}</strong> hooks</span><i /><span><strong>{creatorCount}</strong> creators</span>
+        </div>
+      </header>
+
+      <section className="script-bank-controls" aria-label="Script bank controls">
+        <div className="bank-mode-switch" role="tablist" aria-label="Bank view">
+          <button role="tab" aria-selected={mode === "hooks"} className={mode === "hooks" ? "active" : ""} onClick={() => setMode("hooks")}><Quote size={13} /> Hooks <span>{scripts.length}</span></button>
+          <button role="tab" aria-selected={mode === "scripts"} className={mode === "scripts" ? "active" : ""} onClick={() => setMode("scripts")}><FileText size={13} /> Scripts <span>{scripts.length}</span></button>
+        </div>
+        <label className="bank-search"><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search words, creators, or topics…" /></label>
+      </section>
+
+      <nav className="bank-categories" aria-label="Filter by knowledge area">
+        {categories.map((item) => <button key={item} className={category === item ? "active" : ""} aria-pressed={category === item} onClick={() => setCategory(item)}>{item}</button>)}
+      </nav>
+
+      {!scripts.length ? <section className="bank-empty"><AudioLines size={20} /><h2>Your first script will appear here.</h2><p>Save a Reel with the Script label, or transcribe one from Knowledge.</p></section> : !filtered.length ? <section className="bank-empty"><Search size={20} /><h2>No matching scripts.</h2><p>Try another word or knowledge area.</p></section> : mode === "hooks" ? <section className="hook-ledger" aria-label="Saved hooks">
+        {filtered.map((capture, index) => {
+          const hook = transcriptHook(capture);
+          const copied = copiedKey === `hook-${capture.id}`;
+          return <article className="hook-entry" key={capture.id}>
+            <aside><span>{String(index + 1).padStart(2, "0")}</span><small>{capture.contentCategory || "Other"}</small></aside>
+            <div>
+              <div className="hook-source"><span>{capture.creator || "Unknown creator"}</span><i />{capture.title || "Saved Reel"}</div>
+              <blockquote>“{hook}”</blockquote>
+              <div className="hook-actions">
+                <button className={copied ? "copied" : ""} onClick={() => void copyToClipboard(hook, `hook-${capture.id}`)}><Copy size={12} />{copied ? "Hook copied" : "Copy hook"}</button>
+                <a href={capture.url} target="_blank" rel="noreferrer">Open Reel <ExternalLink size={11} /></a>
+              </div>
+            </div>
+          </article>;
+        })}
+      </section> : <section className="script-bank-workspace">
+        <aside className="script-index" aria-label="Transcribed scripts">
+          <header><span>Transcribed scripts</span><small>{filtered.length}</small></header>
+          <div>{filtered.map((capture, index) => {
+            const length = spokenLength(capture.transcript || "");
+            return <button className={selected?.id === capture.id ? "active" : ""} key={capture.id} onClick={() => setSelectedId(capture.id)}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <div><strong>{capture.title || "Saved Reel"}</strong><small>{capture.creator || "Unknown creator"} · {length.label}</small></div>
+              <ChevronRight size={12} />
+            </button>;
+          })}</div>
+        </aside>
+
+        {selected ? <article className="script-reader">
+          {(() => {
+            const transcript = selected.transcript || "";
+            const length = spokenLength(transcript);
+            const paragraphs = transcriptParagraphs(transcript);
+            const structure = selected.structure?.split(/→|->/).map((step) => step.trim()).filter(Boolean) || [];
+            const copied = copiedKey === `script-${selected.id}`;
+            return <>
+              <header>
+                <div className="script-reader-path"><span>{selected.contentCategory || "Other"}</span><i />{selected.creator || "Unknown creator"}</div>
+                <h2>{selected.title || "Saved Reel"}</h2>
+                <div className="script-reader-meta"><span>{length.words} words</span><span>{length.label}</span><span>{structure.length || 1} beats</span></div>
+                <div className="script-reader-actions">
+                  <button className={copied ? "copied" : ""} onClick={() => void copyToClipboard(transcript, `script-${selected.id}`)}><Copy size={12} />{copied ? "Script copied" : "Copy script"}</button>
+                  <a href={selected.url} target="_blank" rel="noreferrer">Open Reel <ExternalLink size={11} /></a>
+                </div>
+              </header>
+
+              <section className="script-hook-line"><small>Hook</small><blockquote>“{transcriptHook(selected)}”</blockquote></section>
+              {structure.length ? <section className="script-map"><small>Script map</small><div>{structure.slice(0, 8).map((step, index) => <span key={`${step}-${index}`}><i>{String(index + 1).padStart(2, "0")}</i>{step}</span>)}</div></section> : null}
+              <section className="script-body"><small>Full transcript</small><div className="transcript-margin-rail">{paragraphs.map((paragraph, index) => <p key={`${paragraph.slice(0, 20)}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span>{paragraph}</p>)}</div></section>
+            </>;
+          })()}
+        </article> : null}
+      </section>}
+    </div>
+  );
+}
+
 function CreatorsView({ library }: { library: LibraryPayload }) {
   const liveCreators = library.creators.map((item, index) => ({
     id: item.id,
@@ -1410,11 +1555,10 @@ function ContextModal({ capture, onClose, onSave }: { capture: ApiCapture; onClo
 function MobileNav({ active, onNavigate }: { active: View; onNavigate: (view: View) => void }) {
   return (
     <nav className="mobile-nav" aria-label="Mobile navigation">
-      {navItems.slice(0, 3).map((item) => {
+      {navItems.filter((item) => item.id !== "setup").map((item) => {
         const Icon = item.icon;
         return <button key={item.id} onClick={() => onNavigate(item.id)} className={active === item.id ? "active" : ""}><Icon size={19} /><span>{item.label}</span></button>;
       })}
-      <button className={`mobile-capture ${active === "setup" ? "active" : ""}`} onClick={() => onNavigate("setup")}><Share2 size={20} /><span>Setup</span></button>
     </nav>
   );
 }
@@ -1497,12 +1641,13 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar active={active} onNavigate={setActive} onCapture={() => setCaptureOpen(true)} liveThreadCount={library.categories.length} liveCreatorCount={Math.max(0, library.creators.length - library.creators.filter((live) => creators.some((seed) => seed.handle === live.creator)).length)} />
+      <Sidebar active={active} onNavigate={setActive} onCapture={() => setCaptureOpen(true)} liveThreadCount={library.categories.length} liveScriptCount={library.captures.filter((capture) => capture.transcript?.trim() && capture.transcriptStatus === "ready").length} liveCreatorCount={Math.max(0, library.creators.length - library.creators.filter((live) => creators.some((seed) => seed.handle === live.creator)).length)} />
       <main className="main-shell">
         <Header active={active} onCapture={() => setCaptureOpen(true)} />
         <div className="mobile-brand"><SpoolMark /><span>spool</span><button aria-label="Open iPhone capture setup" onClick={() => setActive("setup")}><Menu size={19} /></button></div>
         {active === "briefing" ? <Briefing onNavigate={setActive} onOpenThread={openThread} library={library} onRetry={retryCapture} onAddContext={setContextCapture} onTranscribe={transcribeCapture} /> : null}
         {active === "threads" ? <ThreadsView library={library} onTranscribe={transcribeCapture} /> : null}
+        {active === "scripts" ? <ScriptBankView library={library} /> : null}
         {active === "creators" ? <CreatorsView library={library} /> : null}
         {active === "setup" ? <SetupView onCapture={() => setCaptureOpen(true)} health={health} /> : null}
       </main>
