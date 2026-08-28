@@ -187,6 +187,7 @@ function captureStatusCopy(capture: ApiCapture) {
   if (transcriptWorking) return "Reading the spoken words. Spool will continue automatically, even if you leave this page.";
   if (capture.transcriptStatus === "failed") {
     if (/no spoken words/i.test(capture.transcriptError || "")) return "No speech was detected. This Reel stays saved, but it cannot create a script.";
+    if (/limit exceeded|quota|insufficient credits/i.test(capture.transcriptError || "")) return "Your Supadata transcript allowance is used up. Retry after the credits reset or you add more.";
     return "The transcript did not finish. Retry the transcript to continue.";
   }
   if (capture.status === "failed" && /401|authentication_error|api key is invalid/i.test(capture.error || "")) return "Anthropic rejected the API key. Replace it in Vercel, then retry analysis.";

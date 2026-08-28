@@ -410,10 +410,14 @@ async function transcribeCapture(id) {
     capture.transcriptStatus = "failed";
     capture.transcriptError = error instanceof Error ? error.message : "Transcription failed";
     capture.status = "needs-context";
-    capture.topic = /no spoken words/i.test(capture.transcriptError) ? "No speech detected" : "Transcript unavailable";
-    capture.summary = /no spoken words/i.test(capture.transcriptError)
+    const noSpeech = /no spoken words/i.test(capture.transcriptError);
+    const limitReached = /limit exceeded|quota|insufficient credits/i.test(capture.transcriptError);
+    capture.topic = noSpeech ? "No speech detected" : limitReached ? "Transcript limit reached" : "Transcript unavailable";
+    capture.summary = noSpeech
       ? "This Reel has no detectable spoken words, so there is no script to add to the bank. The Reel remains saved."
-      : "The Reel is saved, but its spoken words could not be transcribed. Retry the transcript to continue.";
+      : limitReached
+        ? "Your Supadata transcript allowance is used up. This Reel stays saved; retry after your credits reset or you add more."
+        : "The Reel is saved, but its spoken words could not be transcribed. Retry the transcript to continue.";
     capture.transcriptUpdatedAt = new Date().toISOString();
     await upsertCapture(capture);
     return capture;
