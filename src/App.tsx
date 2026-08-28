@@ -85,6 +85,31 @@ type ApiCreator = {
   sourceIds: string[];
 };
 
+type ApiGuideChapter = {
+  id: string;
+  number: number;
+  title: string;
+  summary: string;
+  lessons: string[];
+  structure: string;
+  action: string;
+  sourceId: string;
+  sourceTitle: string;
+  creator: string;
+  url: string;
+  confidence: number;
+};
+
+type ApiGuide = {
+  title: string;
+  summary: string;
+  stage: "First edition" | "Growing guide" | "Field guide";
+  readingMinutes: number;
+  principles: string[];
+  playbook: string[];
+  chapters: ApiGuideChapter[];
+};
+
 type ApiCategory = {
   id: string;
   name: string;
@@ -92,6 +117,7 @@ type ApiCategory = {
   sourceIds: string[];
   topics: string[];
   summary: string;
+  guide?: ApiGuide;
 };
 
 type LibraryPayload = { captures: ApiCapture[]; threads: ApiThread[]; creators: ApiCreator[]; categories: ApiCategory[] };
@@ -547,6 +573,117 @@ function Briefing({ onNavigate, onOpenThread, library, onRetry, onAddContext, on
   );
 }
 
+function categoryGuide(category: ApiCategory, captures: ApiCapture[]): ApiGuide {
+  if (category.guide) return category.guide;
+  const sources = captures.filter((capture) => category.sourceIds.includes(capture.id));
+  const principles = [...new Set(sources.flatMap((source) => source.takeaways || []))].slice(0, 10);
+  const playbook = [...new Set(sources.map((source) => source.action).filter(Boolean) as string[])].slice(0, 7);
+  return {
+    title: `${category.name} field guide`,
+    summary: category.summary,
+    stage: sources.length >= 6 ? "Field guide" : sources.length >= 3 ? "Growing guide" : "First edition",
+    readingMinutes: Math.max(3, sources.length * 2),
+    principles,
+    playbook,
+    chapters: sources.map((source, index) => ({
+      id: `chapter-${source.id}`,
+      number: index + 1,
+      title: source.topic || source.title || `Lesson ${index + 1}`,
+      summary: source.summary || "Spool is still distilling this source.",
+      lessons: (source.takeaways || []).slice(0, 4),
+      structure: source.structure || "",
+      action: source.action || "",
+      sourceId: source.id,
+      sourceTitle: source.title || "Saved Reel",
+      creator: source.creator || "Unknown creator",
+      url: source.url,
+      confidence: source.confidence || 0
+    }))
+  };
+}
+
+function KnowledgeGuide({ category, captures, accent, onClose, onOpenSource }: { category: ApiCategory; captures: ApiCapture[]; accent: string; onClose: () => void; onOpenSource: (sourceId: string) => void }) {
+  const guide = categoryGuide(category, captures);
+  const sourceById = new Map(captures.map((capture) => [capture.id, capture]));
+  const principles = guide.principles.length ? guide.principles : category.topics.map((topic) => `A saved Reel explores ${topic}.`);
+  const playbook = guide.playbook.length ? guide.playbook : guide.chapters.map((chapter) => chapter.action).filter(Boolean);
+
+  return (
+    <article className="knowledge-guide" style={{ "--guide-accent": accent } as React.CSSProperties}>
+      <header className="guide-toolbar">
+        <span><BookOpen size={13} /> Second Brain / {category.name}</span>
+        <button onClick={onClose} aria-label={`Close ${category.name} guide`}><X size={15} /></button>
+      </header>
+
+      <div className="guide-scroll">
+        <header className="guide-cover">
+          <div className="guide-edition"><span>{guide.stage}</span><i />{category.sourceCount} {category.sourceCount === 1 ? "source" : "sources"}<i />{guide.readingMinutes} min read</div>
+          <span className="guide-kicker">Your guide to</span>
+          <h1>{guide.title}</h1>
+          <p>{guide.summary}</p>
+          <nav aria-label={`${category.name} guide sections`}>
+            <a href="#guide-ideas">Core ideas</a>
+            <a href="#guide-playbook">Playbook</a>
+            <a href="#guide-chapters">Chapters</a>
+            <a href="#guide-sources">Sources</a>
+          </nav>
+        </header>
+
+        <section className="guide-section guide-principles" id="guide-ideas">
+          <header><span>01</span><div><small>Start here</small><h2>Core ideas worth keeping</h2></div></header>
+          <div className="guide-principle-list">
+            {principles.slice(0, 8).map((principle, index) => <article key={principle}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <p>{principle}</p>
+            </article>)}
+          </div>
+        </section>
+
+        <section className="guide-section guide-playbook" id="guide-playbook">
+          <header><span>02</span><div><small>Put it to work</small><h2>Your practical playbook</h2></div></header>
+          {playbook.length ? <ol>
+            {playbook.slice(0, 6).map((step, index) => <li key={step}><span>{index + 1}</span><p>{step}</p></li>)}
+          </ol> : <div className="guide-empty"><Feather size={16} /><p>This guide has the ideas. Save another practical Reel to reveal a step-by-step playbook.</p></div>}
+        </section>
+
+        <section className="guide-section guide-chapters" id="guide-chapters">
+          <header><span>03</span><div><small>Learn the subject</small><h2>Chapters from your Reels</h2></div></header>
+          <div className="guide-chapter-spine">
+            {guide.chapters.map((chapter) => {
+              const source = sourceById.get(chapter.sourceId);
+              const structure = chapter.structure.split(/→|->/).map((step) => step.trim()).filter(Boolean);
+              return <article className="guide-chapter" key={chapter.id}>
+                <span className="guide-chapter-marker">{String(chapter.number).padStart(2, "0")}</span>
+                <div className="guide-chapter-copy">
+                  <div className="guide-chapter-source"><span>{chapter.creator}</span><i />{source?.platform || "Instagram"}</div>
+                  <h3>{chapter.title}</h3>
+                  <p>{chapter.summary}</p>
+                  {chapter.lessons.length ? <ul>{chapter.lessons.slice(0, 4).map((lesson) => <li key={lesson}><Check size={12} /><span>{lesson}</span></li>)}</ul> : null}
+                  {structure.length > 1 ? <div className="guide-framework"><strong>Framework</strong><div>{structure.slice(0, 6).map((step, index) => <span key={`${step}-${index}`}>{step}</span>)}</div></div> : null}
+                  {chapter.action ? <div className="guide-try"><Feather size={13} /><span><strong>Try this</strong>{chapter.action}</span></div> : null}
+                  <button onClick={() => onOpenSource(chapter.sourceId)}>Read the source note <ArrowRight size={12} /></button>
+                </div>
+              </article>;
+            })}
+          </div>
+        </section>
+
+        <section className="guide-section guide-source-shelf" id="guide-sources">
+          <header><span>04</span><div><small>Trace every idea</small><h2>Source shelf</h2></div></header>
+          <div>
+            {guide.chapters.map((chapter) => <a href={chapter.url} target="_blank" rel="noreferrer" key={chapter.sourceId}>
+              <span>{String(chapter.number).padStart(2, "0")}</span>
+              <div><strong>{chapter.sourceTitle}</strong><small>{chapter.creator}</small></div>
+              <ExternalLink size={12} />
+            </a>)}
+          </div>
+          <p>This guide grows automatically whenever you save another {category.name} Reel with the Knowledge label.</p>
+        </section>
+      </div>
+    </article>
+  );
+}
+
 function ThreadsView({ library, onTranscribe }: { library: LibraryPayload; onTranscribe: (capture: ApiCapture) => void }) {
   const [query, setQuery] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -741,7 +878,11 @@ function ThreadsView({ library, onTranscribe }: { library: LibraryPayload; onTra
   const selectedCreatorSources = selectedNode?.type === "creator" && selectedNode.creator
     ? knowledgeCaptures.filter((capture) => capture.creator === selectedNode.creator)
     : [];
+  const selectedCategoryCaptures = selectedCategory
+    ? knowledgeCaptures.filter((capture) => selectedCategory.sourceIds.includes(capture.id))
+    : [];
   const capturedAt = selectedCapture ? captureAsSource(selectedCapture).capturedAt : "";
+  const selectedStructureSteps = selectedCapture?.structure?.split(/→|->/).map((step) => step.trim()).filter(Boolean) || [];
   const neighborIds = useMemo(() => {
     if (!selectedNodeId) return new Set<string>();
     const related = new Set<string>([selectedNodeId]);
@@ -785,6 +926,11 @@ function ThreadsView({ library, onTranscribe }: { library: LibraryPayload; onTra
       (node) => connected.has(String(node.id))
     ));
   }, [graph.edges, prefersReducedMotion, resetGraph, selectedNodeId]);
+
+  const openSourceNote = useCallback((sourceId: string) => {
+    const node = graph.nodes.find((item) => item.captureId === sourceId);
+    if (node) setSelectedNodeId(node.id);
+  }, [graph.nodes]);
 
   const paintNode = useCallback((rawNode: NodeObject<VaultNode>, context: CanvasRenderingContext2D, globalScale: number) => {
     const node = rawNode as VaultNode;
@@ -854,7 +1000,7 @@ function ThreadsView({ library, onTranscribe }: { library: LibraryPayload; onTra
 
   return (
     <div className="vault-page knowledge-vault-page">
-      <div className={`vault-graph-workspace ${selectedNode ? "note-open" : ""}`}>
+      <div className={`vault-graph-workspace ${selectedNode && selectedNode.type !== "category" ? "note-open" : ""} ${selectedNode?.type === "category" ? "guide-open" : ""}`}>
         <aside className="map-library-panel">
           <div className="map-library-brand">
             <span className="map-brand-mark"><Link2 size={16} /></span>
@@ -879,7 +1025,14 @@ function ThreadsView({ library, onTranscribe }: { library: LibraryPayload; onTra
         </aside>
 
         <section className="vault-graph" aria-label="Knowledge categories, saved Reels, and creators">
-          <div className="vault-graph-canvas" ref={graphContainerRef}>
+          {selectedNode?.type === "category" && selectedCategory ? <KnowledgeGuide
+            category={selectedCategory}
+            captures={selectedCategoryCaptures}
+            accent={selectedAccent}
+            onClose={resetGraph}
+            onOpenSource={openSourceNote}
+          /> : null}
+          <div className={`vault-graph-canvas ${selectedNode?.type === "category" ? "guide-hidden" : ""}`} ref={graphContainerRef}>
             <div className="map-stats" aria-label="Knowledge map statistics">
               <span><i /> <strong>{atlasCategories.length}</strong> areas</span>
               <b />
@@ -946,25 +1099,25 @@ function ThreadsView({ library, onTranscribe }: { library: LibraryPayload; onTra
           </div>
         </section>
 
-        {selectedNode ? <article className="vault-note" style={{ "--node-accent": selectedAccent } as React.CSSProperties}>
+        {selectedNode && selectedNode.type !== "category" ? <article className="vault-note" style={{ "--node-accent": selectedAccent } as React.CSSProperties}>
           <header><span>{selectedCapture ? `${selectedCapture.title || "Saved Reel"}.md` : `${selectedNode.label}.md`}</span><button aria-label="Close note" onClick={resetGraph}><X size={15} /></button></header>
           <div className="vault-note-body">
             {selectedCapture ? <>
               <span className="vault-note-path">Knowledge / {selectedCategory?.name || "Other"}</span>
               <h2>{selectedCapture.title || "Saved Reel"}</h2>
               <div className="vault-note-tags"><span>{selectedCapture.creator || "Unknown creator"}</span><span>{selectedCategory?.name || "Other"}</span><span>{capturedAt}</span><span>{selectedCapture.platform || "Web"}</span></div>
-              <h3>Summary</h3><p>{selectedCapture.summary || "Spool is still reading this source."}</p>
-              {selectedCapture.takeaways?.length ? <><h3>What you can keep</h3><ul>{selectedCapture.takeaways.map((takeaway) => <li key={takeaway}>{takeaway}</li>)}</ul></> : null}
+              <h3>The idea</h3><p className="vault-note-lede">{selectedCapture.summary || "Spool is still reading this source."}</p>
+              {selectedCapture.hook ? <div className="vault-hook"><small>Opening hook</small><p>“{selectedCapture.hook}”</p></div> : null}
+              {selectedCapture.takeaways?.length ? <><h3>What it teaches</h3><ul className="vault-lesson-list">{selectedCapture.takeaways.map((takeaway) => <li key={takeaway}><Check size={11} /><span>{takeaway}</span></li>)}</ul></> : null}
+              {selectedStructureSteps.length > 1 ? <><h3>How it unfolds</h3><ol className="vault-structure">{selectedStructureSteps.slice(0, 7).map((step, index) => <li key={`${step}-${index}`}><span>{index + 1}</span><p>{step}</p></li>)}</ol></> : null}
+              {selectedCapture.action ? <div className="vault-try"><Feather size={13} /><span><strong>Try this</strong>{selectedCapture.action}</span></div> : null}
               {selectedCapture.sharedText ? <div className="vault-saved-because"><strong>WHY YOU SAVED THIS</strong><p>{selectedCapture.sharedText}</p></div> : null}
-              <div className="vault-note-actions"><a href={selectedCapture.url} target="_blank" rel="noreferrer">Open original <ExternalLink size={12} /></a>{selectedCapture.transcript ? <button><FileText size={12} /> Transcript ready</button> : <button onClick={() => onTranscribe(selectedCapture)}><AudioLines size={12} /> Transcribe</button>}</div>
+              {selectedCapture.transcript ? <details className="vault-transcript"><summary><FileText size={12} /> Read full transcript</summary><p>{selectedCapture.transcript}</p></details> : null}
+              <div className="vault-note-actions"><a href={selectedCapture.url} target="_blank" rel="noreferrer">Open original <ExternalLink size={12} /></a>{!selectedCapture.transcript ? <button onClick={() => onTranscribe(selectedCapture)}><AudioLines size={12} /> Transcribe</button> : null}</div>
             </> : selectedNode.type === "creator" ? <>
               <span className="vault-note-path">Creators</span><h2>{selectedNode.label}</h2><div className="vault-note-tags"><span>{selectedCreatorSources.length} linked Reels</span><span>Creator playbook</span></div>
               <h3>Connected source notes</h3><ul>{selectedCreatorSources.map((capture) => <li key={capture.id}>{capture.title || "Saved Reel"}</li>)}</ul><p>Every new Reel saved with the Creator label strengthens this playbook.</p>
-            </> : <>
-              <span className="vault-note-path">Knowledge</span><h2>{selectedNode.label}</h2><div className="vault-note-tags"><span>{selectedCategory?.sourceCount || 0} saved Reels</span><span>Growing cluster</span></div>
-              <h3>Pattern forming</h3><p>{selectedCategory?.summary || "This area grows as related Reel notes enter your vault."}</p>
-              <h3>Topics connected here</h3><div className="vault-topic-list">{selectedCategory?.topics.length ? selectedCategory.topics.map((topic) => <span key={topic}>{topic}</span>) : <span>Save another Reel to reveal the pattern</span>}</div>
-            </>}
+            </> : <><span className="vault-note-path">Knowledge</span><h2>Source unavailable</h2><p>This note is no longer connected to a saved Reel.</p></>}
           </div>
         </article> : null}
       </div>

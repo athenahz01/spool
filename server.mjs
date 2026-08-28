@@ -465,16 +465,51 @@ function buildLibrary(captures) {
     sourceIds: sources.map((source) => source.id)
   }));
 
-  const categories = [...byCategory.entries()].map(([name, sources]) => ({
-    id: `category-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-    name,
-    sourceCount: sources.length,
-    sourceIds: sources.map((source) => source.id),
-    topics: [...new Set(sources.map((source) => source.topic).filter(Boolean))].slice(0, 6),
-    summary: sources.length === 1
+  const categories = [...byCategory.entries()].map(([name, sources]) => {
+    const topics = [...new Set(sources.map((source) => source.topic).filter(Boolean))].slice(0, 8);
+    const principles = [...new Set(sources.flatMap((source) => source.takeaways || []).filter(Boolean))].slice(0, 10);
+    const playbook = [...new Set(sources.map((source) => source.action).filter(Boolean))].slice(0, 7);
+    const guideSummary = sources.length === 1
       ? sources[0].summary
-      : `${sources.length} saved Reels are building this part of your second brain.`
-  }));
+      : `${sources.length} saved Reels now form a practical guide to ${name.toLowerCase()}: what matters, how people approach it, and what you can try next.`;
+    const guideWords = sources.reduce((total, source) => total + [source.summary, source.structure, ...(source.takeaways || [])]
+      .filter(Boolean)
+      .join(" ")
+      .split(/\s+/)
+      .length, 0);
+    const guide = {
+      title: `${name} field guide`,
+      summary: guideSummary,
+      stage: sources.length >= 6 ? "Field guide" : sources.length >= 3 ? "Growing guide" : "First edition",
+      readingMinutes: Math.max(3, Math.ceil(guideWords / 180)),
+      principles,
+      playbook,
+      chapters: sources.map((source, index) => ({
+        id: `chapter-${source.id}`,
+        number: index + 1,
+        title: source.topic || source.title || `Lesson ${index + 1}`,
+        summary: source.summary || "This source is still being distilled.",
+        lessons: (source.takeaways || []).slice(0, 4),
+        structure: source.structure || "",
+        action: source.action || "",
+        sourceId: source.id,
+        sourceTitle: source.title || "Saved Reel",
+        creator: source.creator || "Unknown creator",
+        url: source.url,
+        confidence: source.confidence || 0
+      }))
+    };
+
+    return {
+      id: `category-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      name,
+      sourceCount: sources.length,
+      sourceIds: sources.map((source) => source.id),
+      topics,
+      summary: guideSummary,
+      guide
+    };
+  });
 
   return { captures, threads, creators, categories };
 }

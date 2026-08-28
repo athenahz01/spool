@@ -28,6 +28,16 @@ Spool, saved Reels, fragments, threads, chapters, patterns, supporting saves, cr
 - On mobile, category tabs scroll horizontally and the action/supporting-saves sidebar stacks below the reading card.
 - Signature: the butter-to-baby-blue chapter marker connects the daily briefing to the Second Brain without copying its graph layout.
 
+## Current Knowledge direction — Living Field Guides
+
+- The graph is the map, not the lesson. Large category nodes open a full reading guide; small Reel nodes open evidence-rich source notes.
+- Content hierarchy: `Knowledge area → Living guide → Chapters → Lessons/frameworks → Source Reels`.
+- Every guide includes a short orientation, core ideas, a practical playbook, Reel-derived chapters, and a source shelf.
+- Guides mature automatically from `First edition` to `Growing guide` to `Field guide` as more Knowledge-labelled Reels enter the category.
+- Individual source notes use: `The idea → Opening hook → What it teaches → How it unfolds → Try this → Transcript`.
+- Signature: a baby-blue-to-butter vertical chapter spine visibly connects synthesized knowledge back to the Reel evidence.
+- Keep guide reading immersive on desktop while preserving the category library at left; on iPhone, keep the category rail above the reader and avoid adding another primary tab.
+
 ## Reserved Briefing direction — Focus Queue
 
 - Mental model: `Remember → Try → Review`.
@@ -50,3 +60,5 @@ Spool, saved Reels, fragments, threads, chapters, patterns, supporting saves, cr
 - Equal-weight dashboard cards → one dominant reading card and one action inset.
 - Always-expanded source inbox → supporting saves first, operational details behind disclosure.
 - Decorative gradients → color only where it communicates chapter identity or action.
+- Thin category summary drawer → a real guide with progressive disclosure and traceable sources.
+- Treating every Reel as an equal note → synthesize the branch first, then let users inspect supporting evidence.
