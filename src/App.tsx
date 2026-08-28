@@ -1131,7 +1131,8 @@ function ThreadsView({ library, onTranscribe }: { library: LibraryPayload; onTra
 
 function transcriptHook(capture: ApiCapture) {
   if (capture.hook?.trim()) return capture.hook.trim();
-  const opening = capture.transcript?.match(/^(.{1,220}?)(?:[.!?](?:\s|$)|$)/)?.[1]?.trim();
+  const spokenText = capture.transcript?.trim().replace(/\s+/g, " ") || "";
+  const opening = spokenText.match(/^(.{1,220}?)(?:[.!?](?:\s|$)|$)/)?.[1]?.trim() || spokenText.slice(0, 220).trim();
   return opening ? `${opening}${/[.!?]$/.test(opening) ? "" : "."}` : "Opening line not detected.";
 }
 
