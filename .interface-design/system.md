@@ -38,6 +38,19 @@ Spool, saved Reels, fragments, threads, chapters, patterns, supporting saves, cr
 - Signature: a baby-blue-to-butter vertical chapter spine visibly connects synthesized knowledge back to the Reel evidence.
 - Keep guide reading immersive on desktop while preserving the category library at left; on iPhone, keep the category rail above the reader and avoid adding another primary tab.
 
+## Current Second Brain direction — Playbooks first
+
+- Default to `Playbooks`; preserve the graph behind `Map`, and keep raw evidence behind `Sources`.
+- The main hierarchy is `Second Brain → Playbook → Principles → Workflow → Reusable patterns → Supporting Reels`.
+- Initial playbooks are: Run a small AI team, Build a personal content engine, Build career proof, Create lifestyle Reels, Find and launch ideas, and Technical experiment lab.
+- Each playbook must state an outcome before showing detail. The reader then answers: what the saves agree on, how to apply it, what tools or patterns recur, what to try next, and which Reels support it.
+- A Reel may support more than one playbook when its existing content clearly overlaps. Do not force a single-folder mental model.
+- Source facets are generated locally: domain, knowledge type, use case, evidence, and freshness.
+- Incomplete or blocked saves belong in a Recovery Inbox and stay out of synthesized playbooks until their lesson is verifiable.
+- Cost rule: browsing, regrouping, filters, playbook generation, and recovery status must never call Claude or Supadata. They derive deterministically from existing summaries, takeaways, structures, actions, captions, notes, and stored transcripts.
+- New captures keep the existing single analysis pipeline; this interface must not add a second AI pass.
+- Signature: a thin source-colored spine runs beside the reading surface, connecting the practical guide back to its evidence without recreating the graph.
+
 ## Current creation direction — Creation Banks
 
 - Creation Banks are a daily creation workspace, separate from Second Brain learning but powered by the same saved captures.

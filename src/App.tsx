@@ -122,10 +122,69 @@ type ApiCategory = {
   guide?: ApiGuide;
 };
 
-type LibraryPayload = { captures: ApiCapture[]; threads: ApiThread[]; creators: ApiCreator[]; categories: ApiCategory[] };
+type ApiKnowledgeItem = {
+  id: string;
+  title: string;
+  summary: string;
+  creator: string;
+  url: string;
+  status: ApiCapture["status"];
+  capturedAt?: string;
+  contentCategory: string;
+  knowledgeType: string;
+  domains: string[];
+  useCases: string[];
+  evidence: string;
+  freshness: string;
+  sourceCoverage: string;
+  sourceId: string;
+};
+
+type ApiPlaybookSource = {
+  id: string;
+  title: string;
+  creator: string;
+  url: string;
+  summary: string;
+  evidence: string;
+  freshness: string;
+  knowledgeType: string;
+  confidence: number;
+};
+
+type ApiPlaybook = {
+  id: string;
+  title: string;
+  outcome: string;
+  summary: string;
+  accent: string;
+  sourceCount: number;
+  sourceIds: string[];
+  stage: "Working system" | "Growing playbook" | "Early draft" | "Not started";
+  readingMinutes: number;
+  domains: string[];
+  knowledgeTypes: string[];
+  principles: string[];
+  workflow: string[];
+  tools: string[];
+  assets: { hooks: string[]; structures: string[]; actions: string[] };
+  missingPieces: string[];
+  updatedAt: string;
+  sources: ApiPlaybookSource[];
+};
+
+type LibraryPayload = {
+  captures: ApiCapture[];
+  threads: ApiThread[];
+  creators: ApiCreator[];
+  categories: ApiCategory[];
+  playbooks: ApiPlaybook[];
+  knowledgeItems: ApiKnowledgeItem[];
+  recovery: ApiKnowledgeItem[];
+};
 type ApiHealth = { ok: boolean; provider: string; configured: boolean; providerStatus: "missing" | "configured" | "connected" | "invalid"; model: string; protected: boolean; transcriptionConfigured?: boolean; transcriptionProvider?: string };
 
-const emptyLibrary: LibraryPayload = { captures: [], threads: [], creators: [], categories: [] };
+const emptyLibrary: LibraryPayload = { captures: [], threads: [], creators: [], categories: [], playbooks: [], knowledgeItems: [], recovery: [] };
 const kindAccents: Record<string, string> = {
   idea: "#d9b93f",
   style: "#d77a66",
@@ -198,7 +257,7 @@ function captureStatusCopy(capture: ApiCapture) {
 
 const navItems: Array<{ id: View; label: string; icon: typeof Compass; count?: number }> = [
   { id: "briefing", label: "Briefing", icon: Compass },
-  { id: "threads", label: "Knowledge", icon: Layers3, count: navCounts.threads },
+  { id: "threads", label: "Second Brain", icon: Layers3, count: navCounts.threads },
   { id: "scripts", label: "Banks", icon: AudioLines },
   { id: "creators", label: "Creators", icon: UsersRound, count: navCounts.creators },
   { id: "setup", label: "iPhone capture", icon: Share2 }
@@ -265,7 +324,7 @@ function Sidebar({ active, onNavigate, onCapture, liveThreadCount, liveScriptCou
 function Header({ active, onCapture }: { active: View; onCapture: () => void }) {
   const titles: Record<View, string> = {
     briefing: "Briefing",
-    threads: "Knowledge graph",
+    threads: "Second Brain",
     scripts: "Hook & script banks",
     creators: "Creator notes",
     setup: "iPhone capture"
@@ -702,7 +761,158 @@ function KnowledgeGuide({ category, captures, accent, onClose, onOpenSource }: {
   );
 }
 
+function formatSavedDate(value?: string) {
+  if (!value) return "Recently saved";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Recently saved";
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
+}
+
+function PlaybookLibrary({ playbooks }: { playbooks: ApiPlaybook[] }) {
+  const activePlaybooks = useMemo(() => playbooks.filter((playbook) => playbook.sourceCount > 0), [playbooks]);
+  const [selectedId, setSelectedId] = useState("");
+  const [openSourceId, setOpenSourceId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!activePlaybooks.length) return;
+    if (!activePlaybooks.some((playbook) => playbook.id === selectedId)) setSelectedId(activePlaybooks[0].id);
+  }, [activePlaybooks, selectedId]);
+
+  const selected = activePlaybooks.find((playbook) => playbook.id === selectedId) || activePlaybooks[0];
+  if (!selected) return <section className="brain-empty"><BookOpen size={22} /><h2>Your first playbook starts with one useful save.</h2><p>Share a Reel with the Knowledge label. Spool will place it into a practical path automatically.</p></section>;
+
+  return (
+    <div className="playbook-workspace">
+      <aside className="playbook-shelf">
+        <header><span>Living playbooks</span><small>{activePlaybooks.length} paths</small></header>
+        <div>
+          {activePlaybooks.map((playbook, index) => <button
+            key={playbook.id}
+            className={playbook.id === selected.id ? "active" : ""}
+            style={{ "--playbook-accent": playbook.accent } as React.CSSProperties}
+            onClick={() => { setSelectedId(playbook.id); setOpenSourceId(null); }}
+          >
+            <span className="playbook-number">{String(index + 1).padStart(2, "0")}</span>
+            <span className="playbook-shelf-copy"><small>{playbook.stage}</small><strong>{playbook.title}</strong><em>{playbook.outcome}</em></span>
+            <span className="playbook-source-count">{playbook.sourceCount}<small>{playbook.sourceCount === 1 ? "save" : "saves"}</small></span>
+          </button>)}
+        </div>
+        <footer><Sparkles size={12} /><span>Built from existing analysis. Opening a playbook costs nothing.</span></footer>
+      </aside>
+
+      <article className="playbook-reader" style={{ "--playbook-accent": selected.accent } as React.CSSProperties}>
+        <header className="playbook-reader-hero">
+          <div className="playbook-reader-meta"><span>{selected.stage}</span><i /><span>{selected.readingMinutes} min read</span><i /><span>{selected.sourceCount} supporting saves</span></div>
+          <h1>{selected.title}</h1>
+          <p className="playbook-outcome">{selected.outcome}</p>
+          <p className="playbook-summary">{selected.summary}</p>
+          <div className="playbook-domain-row">{selected.domains.map((domain) => <span key={domain}>{domain}</span>)}{selected.knowledgeTypes.map((type) => <span className="type" key={type}>{type}</span>)}</div>
+        </header>
+
+        <div className="playbook-reader-body">
+          <section className="playbook-reader-section">
+            <header><span>01</span><div><small>The durable part</small><h2>What your saves agree on</h2></div></header>
+            <ul className="playbook-principles">{selected.principles.map((principle) => <li key={principle}><Check size={13} /><span>{principle}</span></li>)}</ul>
+          </section>
+
+          <section className="playbook-reader-section">
+            <header><span>02</span><div><small>Put it into motion</small><h2>Practical workflow</h2></div></header>
+            <ol className="playbook-workflow">{selected.workflow.map((step, index) => <li key={step}><span>{index + 1}</span><p>{step}</p></li>)}</ol>
+          </section>
+
+          <section className="playbook-reader-section">
+            <header><span>03</span><div><small>Keep the reusable parts</small><h2>Tools and patterns</h2></div></header>
+            <div className="playbook-assets-grid">
+              <div className="playbook-toolbox"><h3>Tools mentioned</h3>{selected.tools.length ? <div>{selected.tools.map((tool) => <span key={tool}>{tool}</span>)}</div> : <p>No specific tools are essential to this playbook yet.</p>}</div>
+              <div className="playbook-patterns"><h3>Reusable structures</h3>{selected.assets.structures.length ? selected.assets.structures.slice(0, 3).map((structure) => <p key={structure}>{structure}</p>) : <p>More source structures will appear as this playbook grows.</p>}</div>
+            </div>
+            {selected.assets.hooks.length ? <div className="playbook-hook-strip"><small>OPENINGS WORTH REMEMBERING</small>{selected.assets.hooks.slice(0, 3).map((hook) => <blockquote key={hook}>“{hook}”</blockquote>)}</div> : null}
+          </section>
+
+          <section className="playbook-reader-section">
+            <header><span>04</span><div><small>Turn learning into progress</small><h2>Try next</h2></div></header>
+            <div className="playbook-actions">{(selected.assets.actions.length ? selected.assets.actions : selected.workflow.slice(0, 3)).map((action) => <div key={action}><Feather size={13} /><p>{action}</p></div>)}</div>
+          </section>
+
+          <section className="playbook-reader-section playbook-sources">
+            <header><span>05</span><div><small>Trace it back</small><h2>Supporting Reels</h2></div></header>
+            <div>{selected.sources.map((source, index) => {
+              const open = source.id === openSourceId;
+              return <div className={`playbook-source ${open ? "open" : ""}`} key={source.id}>
+                <button onClick={() => setOpenSourceId(open ? null : source.id)} aria-expanded={open}>
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <span><small>{source.creator} · {source.knowledgeType}</small><strong>{source.title}</strong></span>
+                  <span className="source-evidence">{source.evidence}</span>
+                  <ChevronRight size={14} />
+                </button>
+                {open ? <div className="playbook-source-detail"><p>{source.summary}</p><div><span>{source.freshness}</span><span>{Math.round(source.confidence * 100)}% analysis confidence</span><a href={source.url} target="_blank" rel="noreferrer">Open original <ExternalLink size={11} /></a></div></div> : null}
+              </div>;
+            })}</div>
+          </section>
+
+          <aside className="playbook-gaps"><div><CircleDot size={15} /><span><small>WHAT WOULD MAKE THIS STRONGER</small><h2>Missing pieces</h2></span></div><ul>{selected.missingPieces.map((piece) => <li key={piece}>{piece}</li>)}</ul><p>These are prompts for what to save or create next—not more homework Claude needs to process.</p></aside>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function SourceLibrary({ library }: { library: LibraryPayload }) {
+  const [query, setQuery] = useState("");
+  const [domain, setDomain] = useState("All domains");
+  const [type, setType] = useState("All types");
+  const [openId, setOpenId] = useState<string | null>(null);
+  const domains = useMemo(() => ["All domains", ...new Set(library.knowledgeItems.flatMap((item) => item.domains))], [library.knowledgeItems]);
+  const types = useMemo(() => ["All types", ...new Set(library.knowledgeItems.map((item) => item.knowledgeType))], [library.knowledgeItems]);
+  const filtered = useMemo(() => library.knowledgeItems.filter((item) => {
+    const matchesQuery = !query.trim() || `${item.title} ${item.summary} ${item.creator} ${item.contentCategory}`.toLowerCase().includes(query.toLowerCase());
+    return matchesQuery && (domain === "All domains" || item.domains.includes(domain)) && (type === "All types" || item.knowledgeType === type);
+  }), [domain, library.knowledgeItems, query, type]);
+
+  return <div className="source-library-page">
+    {library.recovery.length ? <section className="recovery-inbox"><div><Inbox size={17} /><span><small>RECOVERY INBOX</small><strong>{library.recovery.length} saved {library.recovery.length === 1 ? "source needs" : "sources need"} more context</strong></span></div><p>They stay out of your playbooks until the lesson can be verified. Repair them from Briefing when you have context or transcript credits.</p></section> : null}
+    <section className="source-library-toolbar">
+      <div><small>Source library</small><h2>Every saved piece of evidence</h2><p>Filter the raw material without changing or reprocessing it.</p></div>
+      <label><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search titles, ideas, creators…" /></label>
+      <div>{domains.map((item) => <button key={item} className={domain === item ? "active" : ""} onClick={() => setDomain(item)}>{item}</button>)}</div>
+      <div>{types.map((item) => <button key={item} className={type === item ? "active" : ""} onClick={() => setType(item)}>{item}</button>)}</div>
+    </section>
+    <section className="source-ledger">
+      <header><span>{filtered.length} {filtered.length === 1 ? "source" : "sources"}</span><small>Evidence · type · freshness</small></header>
+      {filtered.map((item) => {
+        const open = item.id === openId;
+        return <div className={`source-ledger-item status-${item.status} ${open ? "open" : ""}`} key={item.id}>
+          <button onClick={() => setOpenId(open ? null : item.id)} aria-expanded={open}>
+            <span className="source-status-dot" />
+            <span className="source-ledger-copy"><small>{item.creator} · {item.contentCategory}</small><strong>{item.title}</strong></span>
+            <span>{item.knowledgeType}</span><span>{item.evidence}</span><span>{item.freshness}</span><ChevronRight size={14} />
+          </button>
+          {open ? <div className="source-ledger-detail"><p>{item.summary}</p><div>{item.domains.map((value) => <span key={value}>{value}</span>)}{item.useCases.map((value) => <span key={value}>{value}</span>)}<a href={item.url} target="_blank" rel="noreferrer">Open original <ExternalLink size={11} /></a></div></div> : null}
+        </div>;
+      })}
+      {!filtered.length ? <div className="source-ledger-empty"><Search size={18} /><span>No saved sources match those filters.</span></div> : null}
+    </section>
+  </div>;
+}
+
 function ThreadsView({ library, onTranscribe }: { library: LibraryPayload; onTranscribe: (capture: ApiCapture) => void }) {
+  const [mode, setMode] = useState<"playbooks" | "map" | "sources">("playbooks");
+  return <div className={`second-brain-page mode-${mode}`}>
+    <header className="second-brain-header">
+      <div><span className="eyebrow"><Link2 size={12} /> Your connected knowledge</span><h1>From saved Reels to <em>working knowledge.</em></h1><p>Start with a playbook when you want to use what you learned. Open the map when you want to explore.</p></div>
+      <nav aria-label="Second Brain view">
+        <button className={mode === "playbooks" ? "active" : ""} onClick={() => setMode("playbooks")}><BookOpen size={14} /> Playbooks</button>
+        <button className={mode === "map" ? "active" : ""} onClick={() => setMode("map")}><Share2 size={14} /> Map</button>
+        <button className={mode === "sources" ? "active" : ""} onClick={() => setMode("sources")}><FileText size={14} /> Sources</button>
+      </nav>
+    </header>
+    {mode === "playbooks" ? <PlaybookLibrary playbooks={library.playbooks || []} /> : null}
+    {mode === "map" ? <KnowledgeMapView library={library} onTranscribe={onTranscribe} /> : null}
+    {mode === "sources" ? <SourceLibrary library={library} /> : null}
+  </div>;
+}
+
+function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; onTranscribe: (capture: ApiCapture) => void }) {
   const [query, setQuery] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);

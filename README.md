@@ -5,7 +5,9 @@ Spool turns explicitly shared Instagram Reels, creator profiles, YouTube videos,
 ## What is implemented
 
 - Responsive briefing focused on synthesized ideas, not an inbox
-- Knowledge threads that merge several source reels into one evolving note
+- A Playbooks-first Second Brain with six outcome-based guides, the connected Map, and a filterable Sources ledger
+- Deterministic knowledge facets (domain, type, use case, evidence, freshness) plus a Recovery Inbox for incomplete sources
+- Living playbooks that merge existing summaries, takeaways, structures, actions, and transcripts without another Claude call
 - Creator playbooks for hooks, pillars, voice, and repeatable content engines
 - `POST /api/capture` endpoint for the iPhone Shortcut
 - Neon Postgres persistence in production, with local JSON for laptop development
@@ -21,6 +23,7 @@ Spool turns explicitly shared Instagram Reels, creator profiles, YouTube videos,
 - Resumable Vercel processing: transcript jobs checkpoint their Supadata job ID and hand Claude analysis to a fresh function invocation
 - Automatic repair for stale jobs, with distinct transcript, source-access, and Claude-analysis recovery messages
 - Hook and Script banks with category search, opening-pattern filters, reusable script shapes, and zero-cost browsing/copying
+- Zero-cost Second Brain browsing and regrouping: opening playbooks, changing filters, and exploring the map never calls Claude or Supadata
 - A complete in-app Shortcut setup recipe at `/shortcut-setup.html`
 - Demo mode that works without credentials
 

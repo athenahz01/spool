@@ -108,6 +108,161 @@ function inferContentCategory(capture) {
   return "Other";
 }
 
+function captureSearchText(capture) {
+  return [
+    capture.title,
+    capture.topic,
+    capture.summary,
+    capture.hook,
+    capture.structure,
+    capture.action,
+    capture.sharedText,
+    ...(capture.takeaways || [])
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function inferKnowledgeType(capture) {
+  const text = captureSearchText(capture);
+  if (/\b(template|checklist|swipe file|prompt pack|copy.?paste|script bank|framework)\b/.test(text)) return /framework/.test(text) ? "Framework" : "Template";
+  if (/\b(opportunity|apply|internship|job|recruit|hiring|market gap|business idea)\b/.test(text)) return "Opportunity";
+  if (/\b(workflow|process|pipeline|steps?|how to|automation|build|create|set up|setup)\b/.test(text) || String(capture.structure || "").includes("→")) return "Workflow";
+  if (capture.kind === "tool" || /\b(tool|app|software|platform|integration)\b/.test(text)) return "Tool";
+  if (/\b(case study|day in the life|vlog|story|example|i built|i made)\b/.test(text)) return "Example";
+  return "Concept";
+}
+
+function inferKnowledgeDomains(capture) {
+  const category = capture.contentCategory || inferContentCategory(capture);
+  const text = captureSearchText(capture);
+  const domains = new Set();
+  if (category === "AI Products" || /\b(ai|claude|agent|llm|machine learning|automation)\b/.test(text)) domains.add("AI Building");
+  if (category === "Content Creation" || /\b(content strategy|content engine|hook|script|carousel|linkedin post|audience growth|posting|video pacing|video editing|storytelling)\b/.test(text)) domains.add("Content");
+  if (["Career", "Recruiting"].includes(category) || /\b(career|resume|portfolio|intern|job|recruit|cold email)\b/.test(text)) domains.add("Career");
+  if (category === "Startups" || /\b(startup|founder|business|mvp|validation|customer discovery)\b/.test(text)) domains.add("Startups");
+  if (["Vlogs & Life", "Personal Growth"].includes(category) || /\b(vlog|lifestyle|routine|travel|outfit|wellness)\b/.test(text)) domains.add("Lifestyle");
+  if (category === "Other" || /\b(shader|monte carlo|raspberry pi|python|simulation|coding experiment)\b/.test(text)) domains.add("Technical Learning");
+  return [...domains.size ? domains : new Set([category])];
+}
+
+function inferUseCases(capture) {
+  const text = captureSearchText(capture);
+  const useCases = new Set(["Learn"]);
+  if (/\b(build|code|create|make|prototype|implement|set up|setup)\b/.test(text)) useCases.add("Build");
+  if (/\b(content|reel|hook|script|carousel|post|vlog)\b/.test(text)) useCases.add("Create");
+  if (capture.action || /\b(try|apply|use this|next step)\b/.test(text)) useCases.add("Apply");
+  if (/\b(template|checklist|framework|reference|guide)\b/.test(text)) useCases.add("Reference");
+  return [...useCases];
+}
+
+function inferEvidence(capture) {
+  if (capture.status !== "ready") return "Incomplete";
+  if (capture.transcript?.trim()) return "Transcript";
+  if (capture.extraction && /caption|embed|page/i.test(capture.extraction)) return "Caption";
+  if (capture.sharedText?.trim()) return "Your note";
+  return "Source summary";
+}
+
+function inferFreshness(capture) {
+  const text = captureSearchText(capture);
+  return /\b(today|this week|this month|202[4-9]|update|algorithm|trend|trending|event|launch date|limited|deadline|season|world cup|us open)\b/.test(text)
+    ? "Time-sensitive"
+    : "Evergreen";
+}
+
+const playbookDefinitions = [
+  {
+    id: "run-small-ai-team",
+    title: "Run a small AI team",
+    outcome: "Turn separate AI agents into a focused team with clear jobs, tools, and handoffs.",
+    description: "Your saved systems for agent roles, parallel work, prompt hygiene, and AI-assisted execution.",
+    accent: "#e5c957",
+    categories: ["AI Products"],
+    keywords: ["agent", "sub-agent", "orchestrat", "parallel", "claude.md", "prompt", "ai team", "workflow automation"],
+    fallbackWorkflow: ["Give every agent one narrow job and a clear definition of done.", "Write the identity, context, and rules it needs to make decisions.", "Connect only the tools required for that job.", "Define handoffs between agents before running work in parallel.", "Review failures and remove stale or conflicting instructions."],
+    missingPieces: ["A reusable agent brief template", "A lightweight quality-control checklist", "A real weekly operating rhythm"]
+  },
+  {
+    id: "personal-content-engine",
+    title: "Build a personal content engine",
+    outcome: "Move from idea research to scripts, carousels, and publishable Reels without starting from zero.",
+    description: "Hooks, creator systems, competitor research, repurposing, and production workflows from your saves.",
+    accent: "#7fa9d4",
+    categories: ["Content Creation"],
+    keywords: ["content", "reel", "hook", "script", "carousel", "creator", "linkedin", "competitor", "audience", "editing"],
+    fallbackWorkflow: ["Collect proven topics and opening patterns from creators in your niche.", "Choose one clear promise and draft the hook before the body.", "Build the content around a simple repeatable structure.", "Repurpose the same idea across Reel, carousel, and written formats.", "Review performance and save the reusable pattern—not only the post."],
+    missingPieces: ["A weekly publishing cadence", "Your own hook performance data", "A consistent review-and-repurpose ritual"]
+  },
+  {
+    id: "build-career-proof",
+    title: "Build career proof",
+    outcome: "Turn small projects and clear outreach into visible evidence that helps you get opportunities.",
+    description: "Portfolio projects, resume proof, outreach structures, and recruiting ideas collected in one path.",
+    accent: "#9bbde0",
+    categories: ["Career", "Recruiting"],
+    keywords: ["resume", "portfolio", "job", "career", "intern", "recruit", "cold email", "project website"],
+    fallbackWorkflow: ["Pick one small problem you genuinely understand.", "Build a working solution with a narrow scope.", "Document the decisions, iterations, and feedback—not just the final screen.", "Publish a project page that makes the proof easy to scan.", "Use tailored outreach to put the proof in front of the right people."],
+    missingPieces: ["A portfolio story template", "Examples of strong project metrics", "A follow-up sequence for outreach"]
+  },
+  {
+    id: "create-lifestyle-reels",
+    title: "Create lifestyle Reels",
+    outcome: "Turn an ordinary day, outfit, or event into a Reel with a natural beginning, progression, and close.",
+    description: "Day-in-the-life structures, event timing, narration patterns, and lifestyle details worth copying.",
+    accent: "#a9c9e7",
+    categories: ["Vlogs & Life"],
+    keywords: ["vlog", "day in the life", "outfit", "ootd", "routine", "lifestyle", "event"],
+    fallbackWorkflow: ["Choose one reason this day is worth following.", "Map the day into four to six distinct stops or beats.", "Narrate small choices so the video feels personal, not generic.", "Mix routine with one discovery, tension, or timely event.", "Close with a calm payoff or reflection that completes the day."],
+    missingPieces: ["A shot-list template", "Your preferred voiceover pacing", "Examples of stronger closing lines"]
+  },
+  {
+    id: "find-launch-ideas",
+    title: "Find and launch ideas",
+    outcome: "Find problems worth solving, narrow them into a credible niche, and reach a small first version.",
+    description: "Problem discovery, validation, positioning, MVP thinking, and launch lessons from founders you saved.",
+    accent: "#8cbdae",
+    categories: ["Startups"],
+    keywords: ["startup", "founder", "business", "idea", "problem", "mvp", "validation", "customer", "launch"],
+    fallbackWorkflow: ["Keep a log of recurring problems you personally experience.", "Describe the ideal fix before choosing a product format.", "Research existing solutions and talk to people with the same problem.", "Narrow to a niche where your experience gives you an advantage.", "Build the smallest version that can test the riskiest assumption."],
+    missingPieces: ["A validation interview script", "A decision rule for choosing one idea", "A lightweight launch checklist"]
+  },
+  {
+    id: "technical-experiment-lab",
+    title: "Technical experiment lab",
+    outcome: "Turn interesting technical concepts into small experiments you can run, see, and explain.",
+    description: "A shelf for coding concepts, simulations, hardware prototypes, and visual experiments.",
+    accent: "#6f89b3",
+    categories: ["Other"],
+    keywords: ["shader", "monte carlo", "raspberry pi", "simulation", "python", "pixel", "hardware", "technical"],
+    fallbackWorkflow: ["Restate the concept in one sentence and identify its inputs and outputs.", "Build the smallest visible or measurable version.", "Change one variable at a time and record what happens.", "Connect the result to a practical use case.", "Explain the experiment in your own words so it becomes durable knowledge."],
+    missingPieces: ["A repeatable experiment note", "Links to starter code", "A place to record results and variations"]
+  }
+];
+
+const knownTools = ["Claude", "Claude Code", "Apify", "Scribe", "Supadata", "Perplexity", "Descript", "Gmail", "Canva", "Notion", "Replit", "Raspberry Pi", "Python", "Watermelon UI", "Motion Primitives", "Haiku"];
+
+function uniqueText(items, limit = Infinity) {
+  const seen = new Set();
+  const result = [];
+  for (const item of items.flat().filter(Boolean)) {
+    const value = String(item).trim();
+    const key = value.toLowerCase();
+    if (!value || seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+function matchesPlaybook(capture, definition) {
+  const category = capture.contentCategory || inferContentCategory(capture);
+  const text = captureSearchText(capture);
+  const categoryMatch = definition.categories.includes(category);
+  const keywordHits = definition.keywords.filter((keyword) => text.includes(keyword)).length;
+  if (definition.id === "run-small-ai-team") return (categoryMatch && keywordHits >= 1) || keywordHits >= 3;
+  return categoryMatch || keywordHits >= 3;
+}
+
 function transcriptText(payload) {
   const content = payload?.content ?? payload?.result?.content;
   if (typeof content === "string") return content.trim();
@@ -566,7 +721,7 @@ async function prepareStaleRepairs() {
   return repaired;
 }
 
-function buildLibrary(captures) {
+export function buildLibrary(captures) {
   const ready = captures.filter((capture) => capture.status === "ready");
   const byTopic = new Map();
   const byCreator = new Map();
@@ -663,7 +818,90 @@ function buildLibrary(captures) {
     };
   });
 
-  return { captures, threads, creators, categories };
+  const knowledgeItems = captures
+    .filter((capture) => hasIntent(capture, "knowledge"))
+    .map((capture) => {
+      const contentCategory = capture.contentCategory || inferContentCategory(capture);
+      return {
+        id: capture.id,
+        title: capture.title || "Saved source",
+        summary: capture.summary || "This source still needs enough context to become knowledge.",
+        creator: capture.creator || "Unknown creator",
+        url: capture.url,
+        status: capture.status,
+        capturedAt: capture.capturedAt,
+        contentCategory,
+        knowledgeType: inferKnowledgeType(capture),
+        domains: inferKnowledgeDomains({ ...capture, contentCategory }),
+        useCases: inferUseCases(capture),
+        evidence: inferEvidence(capture),
+        freshness: inferFreshness(capture),
+        sourceCoverage: capture.sourceCoverage || "insufficient",
+        sourceId: capture.id
+      };
+    });
+
+  const playbooks = playbookDefinitions.map((definition) => {
+    const sources = ready
+      .filter((capture) => hasIntent(capture, "knowledge"))
+      .map((capture) => ({ ...capture, contentCategory: capture.contentCategory || inferContentCategory(capture) }))
+      .filter((capture) => matchesPlaybook(capture, definition))
+      .sort((a, b) => (Number(b.confidence || 0) - Number(a.confidence || 0)) || String(b.capturedAt || "").localeCompare(String(a.capturedAt || "")));
+    const principles = uniqueText([
+      sources.flatMap((source) => (source.takeaways || []).slice(0, 2)),
+      sources.flatMap((source) => source.takeaways || [])
+    ], 9);
+    const sourceActions = uniqueText(sources.map((source) => source.action), 5);
+    const workflow = sourceActions.length >= 3 ? sourceActions : uniqueText([sourceActions, definition.fallbackWorkflow], 5);
+    const corpus = sources.map((source) => captureSearchText(source)).join(" ");
+    const tools = knownTools.filter((tool) => corpus.includes(tool.toLowerCase()));
+    const hooks = uniqueText(sources.map((source) => source.hook), 5);
+    const structures = uniqueText(sources.map((source) => source.structure), 5);
+    const knowledgeTypes = uniqueText(sources.map((source) => inferKnowledgeType(source)), 8);
+    const domains = uniqueText(sources.flatMap((source) => inferKnowledgeDomains(source)), 8);
+    const words = sources.reduce((total, source) => total + [source.summary, source.action, source.structure, ...(source.takeaways || [])]
+      .filter(Boolean).join(" ").split(/\s+/).length, 0);
+    return {
+      id: definition.id,
+      title: definition.title,
+      outcome: definition.outcome,
+      summary: sources.length
+        ? `${definition.description} ${sources.length} ${sources.length === 1 ? "save is" : "saves are"} currently shaping this playbook.`
+        : definition.description,
+      accent: definition.accent,
+      sourceCount: sources.length,
+      sourceIds: sources.map((source) => source.id),
+      stage: sources.length >= 7 ? "Working system" : sources.length >= 3 ? "Growing playbook" : sources.length ? "Early draft" : "Not started",
+      readingMinutes: Math.max(3, Math.ceil(words / 190)),
+      domains,
+      knowledgeTypes,
+      principles,
+      workflow,
+      tools,
+      assets: {
+        hooks,
+        structures,
+        actions: sourceActions
+      },
+      missingPieces: definition.missingPieces,
+      updatedAt: sources.map((source) => source.capturedAt).filter(Boolean).sort().at(-1) || "",
+      sources: sources.map((source) => ({
+        id: source.id,
+        title: source.title || "Saved Reel",
+        creator: source.creator || "Unknown creator",
+        url: source.url,
+        summary: source.summary || "",
+        evidence: inferEvidence(source),
+        freshness: inferFreshness(source),
+        knowledgeType: inferKnowledgeType(source),
+        confidence: source.confidence || 0
+      }))
+    };
+  }).sort((a, b) => b.sourceCount - a.sourceCount);
+
+  const recovery = knowledgeItems.filter((item) => item.status !== "ready");
+
+  return { captures, threads, creators, categories, playbooks, knowledgeItems, recovery };
 }
 
 export async function handleApi(req, res, pathname, schedule = (work) => void work) {
