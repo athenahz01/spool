@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 process.env.VERCEL = "1";
-const { buildLibrary } = await import("../server.mjs");
+const { buildAskSourceContext, buildLibrary } = await import("../server.mjs");
 
 const ready = (overrides) => ({
   id: crypto.randomUUID(),
@@ -68,4 +68,17 @@ test("buildLibrary creates playbooks and facets without calling a paid service",
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test("Ask Spool sends only compact ready notes in relevance order", () => {
+  const captures = [
+    ready({ id: "second", title: "Second result", transcript: "x".repeat(20_000), summary: "A compact second summary." }),
+    ready({ id: "first", title: "First result", transcript: "y".repeat(20_000), summary: "The strongest summary." }),
+    { id: "blocked", status: "needs-context", intents: ["knowledge"], title: "Blocked", url: "https://example.com" }
+  ];
+  const result = buildAskSourceContext(captures, ["first", "blocked", "second"]);
+  assert.deepEqual(result.sources.map((source) => source.id), ["first", "second"]);
+  assert.match(result.context, /^\[1\]\nTitle: First result/);
+  assert.ok(!result.context.includes("x".repeat(100)));
+  assert.ok(!result.context.includes("y".repeat(100)));
 });

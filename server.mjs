@@ -8,6 +8,7 @@ import { findCapture, readCaptures, storageMode, upsertCapture } from "./lib/sto
 const root = fileURLToPath(new URL(".", import.meta.url));
 const distDir = join(root, "dist");
 const port = Number(process.env.PORT || 8787);
+const askWindows = new Map();
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -252,6 +253,72 @@ function uniqueText(items, limit = Infinity) {
     if (result.length >= limit) break;
   }
   return result;
+}
+
+function clipText(value, limit) {
+  const text = String(value || "").trim();
+  return text.length > limit ? `${text.slice(0, limit - 1).trim()}…` : text;
+}
+
+export function buildAskSourceContext(captures, sourceIds) {
+  const requested = (Array.isArray(sourceIds) ? sourceIds : []).map(String).slice(0, 5);
+  const byId = new Map(captures.map((capture) => [String(capture.id), capture]));
+  const sources = requested
+    .map((id) => byId.get(id))
+    .filter((capture) => capture && capture.status === "ready" && hasIntent(capture, "knowledge"))
+    .map((capture, index) => ({
+      number: index + 1,
+      id: capture.id,
+      title: capture.title || "Saved source",
+      creator: capture.creator || "Unknown creator",
+      url: capture.url,
+      note: [
+        `Title: ${clipText(capture.title, 100)}`,
+        `Topic: ${clipText(capture.topic, 80)}`,
+        `Summary: ${clipText(capture.summary, 420)}`,
+        `Takeaways: ${(capture.takeaways || []).slice(0, 4).map((item) => clipText(item, 180)).join(" | ")}`,
+        `Structure: ${clipText(capture.structure, 280)}`,
+        `Next action: ${clipText(capture.action, 180)}`
+      ].filter((line) => !line.endsWith(": ")).join("\n")
+    }));
+  return {
+    sources: sources.map(({ note, ...source }) => source),
+    context: sources.map((source) => `[${source.number}]\n${source.note}`).join("\n\n")
+  };
+}
+
+function allowAsk(req) {
+  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  const key = forwarded || req.socket?.remoteAddress || "local";
+  const now = Date.now();
+  const recent = (askWindows.get(key) || []).filter((time) => now - time < 60 * 60 * 1000);
+  if (recent.length >= 10) return false;
+  recent.push(now);
+  askWindows.set(key, recent);
+  return true;
+}
+
+async function askWithAnthropic(question, sourceContext) {
+  if (!process.env.ANTHROPIC_API_KEY) throw new Error("Claude is not connected yet.");
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const model = process.env.ANTHROPIC_ASK_MODEL || process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  const response = await client.messages.create({
+    model,
+    max_tokens: 700,
+    system: [
+      "You answer questions using only the user's compact Spool source notes.",
+      "Do not use outside knowledge or invent missing details.",
+      "Give a direct answer first, then the most useful principles or steps, then one practical next action.",
+      "Cite supporting sources inline as [1], [2], and so on.",
+      "If the saved notes are insufficient, state exactly what is missing.",
+      "Stay under 350 words. Use plain language and short sections."
+    ].join(" "),
+    messages: [{ role: "user", content: `Question: ${question}\n\nSaved source notes:\n${sourceContext}` }]
+  });
+  const answer = response.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
+  if (!answer) throw new Error("Claude returned an empty answer.");
+  return { answer, model, usage: response.usage };
 }
 
 function matchesPlaybook(capture, definition) {
@@ -938,6 +1005,21 @@ export async function handleApi(req, res, pathname, schedule = (work) => void wo
     const captures = await readCaptures();
     captures.sort((a, b) => String(b.capturedAt).localeCompare(String(a.capturedAt)));
     return json(res, 200, buildLibrary(captures));
+  }
+  if (pathname === "/api/ask" && req.method === "POST") {
+    try {
+      const body = await readBody(req);
+      const question = clipText(body.question, 320);
+      if (question.length < 3) return json(res, 400, { error: "Ask a complete question." });
+      const captures = await readCaptures();
+      const { sources, context } = buildAskSourceContext(captures, body.sourceIds);
+      if (!sources.length) return json(res, 400, { error: "No ready sources matched this question. Try the free search again." });
+      if (!allowAsk(req)) return json(res, 429, { error: "Ask Spool reached its hourly Claude limit. Free library search still works." });
+      const result = await askWithAnthropic(question, context);
+      return json(res, 200, { ...result, sources, requestCount: 1 });
+    } catch (error) {
+      return json(res, 503, { error: error instanceof Error ? error.message : "Ask Spool could not synthesize this answer." });
+    }
   }
   if (pathname === "/api/repair" && req.method === "POST") {
     const repaired = await prepareStaleRepairs();

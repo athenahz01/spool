@@ -26,6 +26,7 @@ Spool turns explicitly shared Instagram Reels, creator profiles, YouTube videos,
 - Hook and Script banks with category search, opening-pattern filters, reusable script shapes, and zero-cost browsing/copying
 - Zero-cost Second Brain browsing and regrouping: opening playbooks, changing filters, and exploring the map never calls Claude or Supadata
 - A regression test that verifies library and playbook generation performs no external fetches
+- Ask Spool with free on-device retrieval, evidence links, optional one-request Claude synthesis, and a 12-answer device cache
 - A complete in-app Shortcut setup recipe at `/shortcut-setup.html`
 - Demo mode that works without credentials
 
@@ -52,6 +53,7 @@ Environment variables:
 
 - `ANTHROPIC_API_KEY`: enables automatic source enrichment. Never put this value in frontend code.
 - `ANTHROPIC_MODEL`: defaults to `claude-sonnet-5`.
+- `ANTHROPIC_ASK_MODEL`: optional lower-cost model override used only for explicit Ask Spool synthesis.
 - `DATABASE_URL`: Neon Postgres connection string used by Vercel.
 - `SUPADATA_API_KEY`: optional; unlocks selective spoken-word transcripts for public videos.
 - `SPOOL_CAPTURE_TOKEN`: optional bearer token protecting the capture endpoint on a public deployment.

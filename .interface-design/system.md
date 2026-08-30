@@ -63,6 +63,17 @@ Spool, saved Reels, fragments, threads, chapters, patterns, supporting saves, cr
 - Browsing and copying must never trigger Claude or Supadata usage.
 - On iPhone, primary navigation is `Briefing / Knowledge / Banks / Creators`; one-time iPhone setup remains in the top-right utility button.
 
+## Current utility direction — Ask Spool
+
+- Ask Spool is a global utility opened from the top bar or `⌘/Ctrl + K`; it is not another primary navigation tab.
+- Default interaction is `Search free`: local deterministic retrieval over ready Knowledge saves, returning a direct summary, useful points, actions, and evidence links without any API call.
+- Optional `Synthesize · 1 request` sends at most five compact source notes to Claude. Never include full transcripts in the synthesis request.
+- Cache the latest 12 Claude answers on the device. Repeating the same question against the same sources must reuse the saved answer without a new request.
+- Exclude queued, failed, and needs-context sources from answers.
+- Keep free and paid states explicit in the interface: `Free`, `1 request`, or `Saved answer · no new request`.
+- Use an hourly server-side ceiling as a final cost guard; free retrieval remains available when the ceiling is reached.
+- Signature: every answer ends in a numbered evidence shelf that leads back to the exact saved Reels.
+
 ## Reserved Briefing direction — Focus Queue
 
 - Mental model: `Remember → Try → Review`.

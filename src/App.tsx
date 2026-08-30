@@ -183,6 +183,13 @@ type LibraryPayload = {
   recovery: ApiKnowledgeItem[];
 };
 type ApiHealth = { ok: boolean; provider: string; configured: boolean; providerStatus: "missing" | "configured" | "connected" | "invalid"; model: string; protected: boolean; transcriptionConfigured?: boolean; transcriptionProvider?: string };
+type ApiAskResponse = {
+  answer: string;
+  model: string;
+  requestCount: number;
+  usage?: { input_tokens?: number; output_tokens?: number };
+  sources: Array<{ number: number; id: string; title: string; creator: string; url: string }>;
+};
 
 const emptyLibrary: LibraryPayload = { captures: [], threads: [], creators: [], categories: [], playbooks: [], knowledgeItems: [], recovery: [] };
 const kindAccents: Record<string, string> = {
@@ -321,7 +328,7 @@ function Sidebar({ active, onNavigate, onCapture, liveThreadCount, liveScriptCou
   );
 }
 
-function Header({ active, onCapture }: { active: View; onCapture: () => void }) {
+function Header({ active, onCapture, onAsk }: { active: View; onCapture: () => void; onAsk: () => void }) {
   const titles: Record<View, string> = {
     briefing: "Briefing",
     threads: "Second Brain",
@@ -338,7 +345,7 @@ function Header({ active, onCapture }: { active: View; onCapture: () => void }) 
         <strong>{titles[active]}</strong>
       </div>
       <div className="topbar-actions">
-        <button className="icon-button" aria-label="Search"><Search size={18} /></button>
+        <button className="ask-spool-button" onClick={onAsk}><Sparkles size={14} /> Ask Spool <kbd>⌘K</kbd></button>
         <button className="quiet-button" onClick={onCapture}><Plus size={16} /> Add link</button>
       </div>
     </header>
@@ -1781,6 +1788,137 @@ function SetupView({ onCapture, health }: { onCapture: () => void; health: ApiHe
   );
 }
 
+type LocalAskResult = {
+  lead: string;
+  points: string[];
+  actions: string[];
+  sources: ApiCapture[];
+};
+
+const askStopWords = new Set(["a", "about", "all", "am", "an", "and", "are", "build", "can", "could", "do", "does", "for", "from", "have", "how", "i", "in", "is", "it", "learn", "make", "me", "my", "of", "on", "or", "plan", "practical", "save", "saved", "saves", "should", "that", "the", "this", "to", "turn", "use", "what", "when", "where", "which", "with"]);
+
+function askTokens(question: string) {
+  const tokens = question.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter((token) => token.length > 1 && !askStopWords.has(token));
+  const expanded = new Set(tokens);
+  const joined = tokens.join(" ");
+  if (/career|job|resume|portfolio|intern/.test(joined)) ["career", "recruiting", "resume", "portfolio"].forEach((token) => expanded.add(token));
+  if (/content|reel|video|script|hook|post|creator/.test(joined)) ["content", "hook", "script", "creator"].forEach((token) => expanded.add(token));
+  if (/\bai\b|agent|claude|automat/.test(joined)) ["ai", "agent", "claude", "automation"].forEach((token) => expanded.add(token));
+  if (/startup|business|idea|launch|founder/.test(joined)) ["startup", "business", "launch", "founder"].forEach((token) => expanded.add(token));
+  if (/vlog|lifestyle|routine|outfit/.test(joined)) ["vlog", "lifestyle", "routine"].forEach((token) => expanded.add(token));
+  return [...expanded];
+}
+
+function searchSpool(question: string, library: LibraryPayload): LocalAskResult | null {
+  const tokens = askTokens(question);
+  if (!tokens.length) return null;
+  const scored = library.captures
+    .filter((capture) => capture.status === "ready" && (!capture.intents || capture.intents.includes("knowledge")))
+    .map((capture) => {
+      const fields = [
+        [capture.title, 7],
+        [capture.topic, 7],
+        [capture.contentCategory, 5],
+        [capture.summary, 4],
+        [(capture.takeaways || []).join(" "), 3],
+        [capture.structure, 2],
+        [capture.action, 2],
+        [capture.sharedText, 2],
+        [capture.transcript?.slice(0, 8_000), 1]
+      ] as Array<[string | undefined, number]>;
+      const score = tokens.reduce((total, token) => total + fields.reduce((fieldTotal, [value, weight]) => fieldTotal + (String(value || "").toLowerCase().includes(token) ? weight : 0), 0), 0);
+      return { capture, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || Number(b.capture.confidence || 0) - Number(a.capture.confidence || 0))
+    .slice(0, 5);
+  if (!scored.length) return null;
+  const sources = scored.map((item) => item.capture);
+  const unique = (items: Array<string | undefined>, limit: number) => [...new Set(items.map((item) => item?.trim()).filter(Boolean) as string[])].slice(0, limit);
+  return {
+    lead: sources[0].summary || "Spool found related notes, but the strongest source still needs a clearer summary.",
+    points: unique(sources.flatMap((source) => source.takeaways || []), 5),
+    actions: unique(sources.map((source) => source.action), 3),
+    sources
+  };
+}
+
+function AskSpool({ library, onClose }: { library: LibraryPayload; onClose: () => void }) {
+  const [question, setQuestion] = useState("");
+  const [result, setResult] = useState<LocalAskResult | null>(null);
+  const [searched, setSearched] = useState(false);
+  const [claude, setClaude] = useState<ApiAskResponse | null>(null);
+  const [status, setStatus] = useState<"idle" | "thinking" | "cached" | "ready" | "error">("idle");
+  const [error, setError] = useState("");
+  const suggestions = ["How should I build a small AI team?", "What hooks and content patterns have I saved?", "Turn my career saves into a practical plan."];
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  const runFreeSearch = (nextQuestion = question) => {
+    const trimmed = nextQuestion.trim();
+    if (!trimmed) return;
+    setQuestion(trimmed);
+    setResult(searchSpool(trimmed, library));
+    setSearched(true);
+    setClaude(null);
+    setStatus("idle");
+    setError("");
+  };
+
+  const cacheKey = result ? `${question.toLowerCase()}::${result.sources.map((source) => source.id).join(",")}` : "";
+
+  const synthesize = async () => {
+    if (!result || !cacheKey) return;
+    setStatus("thinking");
+    setError("");
+    try {
+      const cached = JSON.parse(window.localStorage.getItem("spool-ask-cache") || "{}") as Record<string, ApiAskResponse>;
+      if (cached[cacheKey]) {
+        setClaude(cached[cacheKey]);
+        setStatus("cached");
+        return;
+      }
+      const response = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, sourceIds: result.sources.map((source) => source.id) })
+      });
+      const payload = await response.json().catch(() => ({ error: "Ask Spool could not read the response." })) as ApiAskResponse & { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Ask Spool could not synthesize this answer.");
+      setClaude(payload);
+      setStatus("ready");
+      const nextCache = { ...cached, [cacheKey]: payload };
+      const entries = Object.entries(nextCache).slice(-12);
+      window.localStorage.setItem("spool-ask-cache", JSON.stringify(Object.fromEntries(entries)));
+    } catch (askError) {
+      setStatus("error");
+      setError(askError instanceof Error ? askError.message : "Ask Spool could not synthesize this answer.");
+    }
+  };
+
+  return <div className="ask-backdrop" role="presentation" onMouseDown={onClose}>
+    <section className="ask-sheet" role="dialog" aria-modal="true" aria-labelledby="ask-title" onMouseDown={(event) => event.stopPropagation()}>
+      <header><div><span><Sparkles size={12} /> Search your Second Brain</span><h2 id="ask-title">Ask Spool</h2></div><button aria-label="Close Ask Spool" onClick={onClose}><X size={16} /></button></header>
+      <form onSubmit={(event) => { event.preventDefault(); runFreeSearch(); }}>
+        <label htmlFor="ask-question">What do you want to use?</label>
+        <div><textarea id="ask-question" autoFocus rows={2} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="e.g. What have I learned about building AI agents?" /><button disabled={!question.trim()}><Search size={14} /> Search free</button></div>
+        <p><Check size={11} /> Searches saved analysis on this device. No Claude or transcript credits.</p>
+      </form>
+      {!result ? <div className="ask-suggestions">{searched ? <div className="ask-empty"><Search size={15} /><div><strong>No ready saves matched that question.</strong><p>Try a broader phrase, or add context to unfinished saves in Sources.</p></div></div> : null}<small>{searched ? "TRY ANOTHER QUESTION" : "TRY ASKING"}</small>{suggestions.map((suggestion) => <button key={suggestion} onClick={() => runFreeSearch(suggestion)}>{suggestion}<ArrowRight size={12} /></button>)}</div> : <div className="ask-result">
+        <div className="ask-result-label"><span><i /> Instant answer</span><small>Free · {result.sources.length} supporting {result.sources.length === 1 ? "save" : "saves"}</small></div>
+        <section className="ask-local-answer"><p>{result.lead}</p>{result.points.length ? <ul>{result.points.map((point) => <li key={point}><Check size={11} /><span>{point}</span></li>)}</ul> : null}{result.actions.length ? <div><small>GOOD NEXT MOVES</small>{result.actions.map((action) => <p key={action}><Feather size={11} />{action}</p>)}</div> : null}</section>
+        {claude ? <section className="ask-claude-answer"><header><span><Sparkles size={12} /> Claude synthesis</span><small>{status === "cached" ? "Saved answer · no new request" : "1 request"}</small></header><p>{claude.answer}</p></section> : <section className="ask-synthesis"><div><strong>Want a more connected answer?</strong><p>Claude will read only these compact notes—not full transcripts.</p></div><button disabled={status === "thinking"} onClick={() => void synthesize()}>{status === "thinking" ? "Synthesizing…" : "Synthesize · 1 request"}</button></section>}
+        {error ? <div className="ask-error" role="alert"><AlertCircle size={13} /><span>{error} Your free answer is still available.</span></div> : null}
+        <section className="ask-citations"><header><span>Evidence used</span><small>Open the original Reel</small></header>{result.sources.map((source, index) => <a href={source.url} target="_blank" rel="noreferrer" key={source.id}><span>[{index + 1}]</span><span><strong>{source.title || "Saved Reel"}</strong><small>{source.creator || "Unknown creator"}</small></span><ExternalLink size={11} /></a>)}</section>
+      </div>}
+    </section>
+  </div>;
+}
+
 function CaptureModal({ onClose, onCaptured }: { onClose: () => void; onCaptured: (capture: ApiCapture) => void }) {
   const [url, setUrl] = useState("");
   const [sharedText, setSharedText] = useState("");
@@ -1901,6 +2039,7 @@ function MobileNav({ active, onNavigate }: { active: View; onNavigate: (view: Vi
 export default function App() {
   const [active, setActive] = useState<View>("briefing");
   const [captureOpen, setCaptureOpen] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [library, setLibrary] = useState<LibraryPayload>(emptyLibrary);
   const [health, setHealth] = useState<ApiHealth | null>(null);
@@ -1941,6 +2080,17 @@ export default function App() {
     const timeout = window.setTimeout(() => setToast(""), 3200);
     return () => window.clearTimeout(timeout);
   }, [toast]);
+
+  useEffect(() => {
+    const openAsk = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setAskOpen(true);
+      }
+    };
+    window.addEventListener("keydown", openAsk);
+    return () => window.removeEventListener("keydown", openAsk);
+  }, []);
 
   const readyCount = useMemo(() => library.captures.filter((item) => item.status === "ready").length, [library.captures]);
 
@@ -1988,8 +2138,8 @@ export default function App() {
     <div className="app-shell">
       <Sidebar active={active} onNavigate={setActive} onCapture={() => setCaptureOpen(true)} liveThreadCount={library.categories.length} liveScriptCount={library.captures.filter((capture) => capture.transcript?.trim() && capture.transcriptStatus === "ready").length} liveCreatorCount={Math.max(0, library.creators.length - library.creators.filter((live) => creators.some((seed) => seed.handle === live.creator)).length)} />
       <main className="main-shell">
-        <Header active={active} onCapture={() => setCaptureOpen(true)} />
-        <div className="mobile-brand"><SpoolMark /><span>spool</span><button aria-label="Open iPhone capture setup" onClick={() => setActive("setup")}><Menu size={19} /></button></div>
+        <Header active={active} onCapture={() => setCaptureOpen(true)} onAsk={() => setAskOpen(true)} />
+        <div className="mobile-brand"><SpoolMark /><span>spool</span><div><button aria-label="Ask Spool" onClick={() => setAskOpen(true)}><Sparkles size={17} /></button><button aria-label="Open iPhone capture setup" onClick={() => setActive("setup")}><Menu size={19} /></button></div></div>
         {active === "briefing" ? <Briefing onNavigate={setActive} onOpenThread={openThread} library={library} onRetry={retryCapture} onAddContext={setContextCapture} onTranscribe={transcribeCapture} /> : null}
         {active === "threads" ? <ThreadsView library={library} onTranscribe={transcribeCapture} /> : null}
         {active === "scripts" ? <ScriptBankView library={library} /> : null}
@@ -1997,6 +2147,7 @@ export default function App() {
         {active === "setup" ? <SetupView onCapture={() => setCaptureOpen(true)} health={health} /> : null}
       </main>
       <MobileNav active={active} onNavigate={setActive} />
+      {askOpen ? <AskSpool library={library} onClose={() => setAskOpen(false)} /> : null}
       {captureOpen ? <CaptureModal onClose={() => setCaptureOpen(false)} onCaptured={handleCaptured} /> : null}
       {contextCapture ? <ContextModal capture={contextCapture} onClose={() => setContextCapture(null)} onSave={addContext} /> : null}
       {toast ? <div className="toast"><Check size={16} /><span>{toast}</span>{readyCount ? <small>{readyCount} ready</small> : null}</div> : null}
