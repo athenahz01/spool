@@ -8,6 +8,7 @@ Spool turns explicitly shared Instagram Reels, creator profiles, YouTube videos,
 - A Playbooks-first Second Brain with six outcome-based guides, the connected Map, and a filterable Sources ledger
 - Deterministic knowledge facets (domain, type, use case, evidence, freshness) plus a Recovery Inbox for incomplete sources
 - Living playbooks that merge existing summaries, takeaways, structures, actions, and transcripts without another Claude call
+- Copyable and downloadable Markdown playbooks, with expandable source notes that retain their evidence trail
 - Creator playbooks for hooks, pillars, voice, and repeatable content engines
 - `POST /api/capture` endpoint for the iPhone Shortcut
 - Neon Postgres persistence in production, with local JSON for laptop development
@@ -24,6 +25,7 @@ Spool turns explicitly shared Instagram Reels, creator profiles, YouTube videos,
 - Automatic repair for stale jobs, with distinct transcript, source-access, and Claude-analysis recovery messages
 - Hook and Script banks with category search, opening-pattern filters, reusable script shapes, and zero-cost browsing/copying
 - Zero-cost Second Brain browsing and regrouping: opening playbooks, changing filters, and exploring the map never calls Claude or Supadata
+- A regression test that verifies library and playbook generation performs no external fetches
 - A complete in-app Shortcut setup recipe at `/shortcut-setup.html`
 - Demo mode that works without credentials
 
