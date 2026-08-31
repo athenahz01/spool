@@ -1795,7 +1795,7 @@ type LocalAskResult = {
   sources: ApiCapture[];
 };
 
-const askStopWords = new Set(["a", "about", "all", "am", "an", "and", "are", "build", "can", "could", "do", "does", "for", "from", "have", "how", "i", "in", "is", "it", "learn", "make", "me", "my", "of", "on", "or", "plan", "practical", "save", "saved", "saves", "should", "that", "the", "this", "to", "turn", "use", "what", "when", "where", "which", "with"]);
+const askStopWords = new Set(["a", "about", "all", "am", "an", "and", "are", "build", "can", "could", "do", "does", "for", "from", "have", "how", "i", "in", "into", "is", "it", "learn", "make", "me", "my", "of", "on", "or", "plan", "practical", "save", "saved", "saves", "should", "that", "the", "this", "to", "turn", "use", "what", "when", "where", "which", "with"]);
 
 function askTokens(question: string) {
   const tokens = question.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter((token) => token.length > 1 && !askStopWords.has(token));
