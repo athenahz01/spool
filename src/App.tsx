@@ -173,6 +173,25 @@ type ApiPlaybook = {
   sources: ApiPlaybookSource[];
 };
 
+type ApiKnowledgeMembership = {
+  sourceId: string;
+  primaryCategory: string;
+  categories: string[];
+  reasons: Record<string, string>;
+  bridge: boolean;
+};
+
+type ApiKnowledgeConnection = {
+  id: string;
+  sourceId: string;
+  targetSourceId: string;
+  strength: number;
+  reason: string;
+  signals: string[];
+  sharedCategories: string[];
+  crossesAreas: boolean;
+};
+
 type LibraryPayload = {
   captures: ApiCapture[];
   threads: ApiThread[];
@@ -181,6 +200,8 @@ type LibraryPayload = {
   playbooks: ApiPlaybook[];
   knowledgeItems: ApiKnowledgeItem[];
   recovery: ApiKnowledgeItem[];
+  memberships?: ApiKnowledgeMembership[];
+  connections?: ApiKnowledgeConnection[];
 };
 type ApiHealth = { ok: boolean; provider: string; configured: boolean; providerStatus: "missing" | "configured" | "connected" | "invalid"; model: string; protected: boolean; transcriptionConfigured?: boolean; transcriptionProvider?: string };
 type ApiAskResponse = {
@@ -191,7 +212,7 @@ type ApiAskResponse = {
   sources: Array<{ number: number; id: string; title: string; creator: string; url: string }>;
 };
 
-const emptyLibrary: LibraryPayload = { captures: [], threads: [], creators: [], categories: [], playbooks: [], knowledgeItems: [], recovery: [] };
+const emptyLibrary: LibraryPayload = { captures: [], threads: [], creators: [], categories: [], playbooks: [], knowledgeItems: [], recovery: [], memberships: [], connections: [] };
 const kindAccents: Record<string, string> = {
   idea: "#d9b93f",
   style: "#d77a66",
@@ -1055,8 +1076,11 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     y: number;
     accent: string;
     categoryId?: string;
+    categoryIds?: string[];
     captureId?: string;
     creator?: string;
+    bridge?: boolean;
+    connectionCount?: number;
   };
 
   type VaultLink = {
@@ -1065,19 +1089,37 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     target: string | VaultNode;
     accent: string;
     curve: number;
-    kind: "category" | "source" | "creator";
+    kind: "source" | "creator" | "association";
+    reason?: string;
+    strength?: number;
   };
+
+  const networkMemberships = useMemo<ApiKnowledgeMembership[]>(() => {
+    if (library.memberships?.length) return library.memberships;
+    return knowledgeCaptures.map((capture) => ({
+      sourceId: capture.id,
+      primaryCategory: capture.contentCategory || "Other",
+      categories: [capture.contentCategory || "Other"],
+      reasons: { [capture.contentCategory || "Other"]: "Primary subject" },
+      bridge: false
+    }));
+  }, [knowledgeCaptures, library.memberships]);
+
+  const membershipBySource = useMemo(() => new Map(networkMemberships.map((membership) => [membership.sourceId, membership])), [networkMemberships]);
+  const networkConnections = library.connections || [];
 
   const graph = useMemo(() => {
     const nodes: VaultNode[] = [];
-    const edges: Array<{ id: string; from: string; to: string; kind: VaultLink["kind"] }> = [];
+    const edges: Array<{ id: string; from: string; to: string; kind: VaultLink["kind"]; accent?: string; curve?: number; reason?: string; strength?: number }> = [];
     const creatorLinks = new Map<string, string[]>();
+    const categoryNodeByName = new Map<string, { id: string; x: number; y: number; accent: string }>();
 
     atlasCategories.forEach((category, categoryIndex) => {
       const categoryAngle = (categoryIndex / Math.max(1, atlasCategories.length)) * Math.PI * 2 - Math.PI / 2;
       const x = 500 + Math.cos(categoryAngle) * 132;
       const y = 340 + Math.sin(categoryAngle) * 102;
       const accent = categoryAccents[category.name] || categoryAccents.Other;
+      categoryNodeByName.set(category.name, { id: category.id, x, y, accent });
       nodes.push({
         id: category.id,
         type: "category",
@@ -1088,46 +1130,67 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
         accent,
         categoryId: category.id
       });
+    });
 
-      const captures = knowledgeCaptures.filter((capture) => category.sourceIds.includes(capture.id));
-      captures.forEach((capture, sourceIndex) => {
-        const angle = (sourceIndex / Math.max(1, captures.length)) * Math.PI * 2 - Math.PI / 2;
-        const ring = Math.floor(sourceIndex / 9);
-        const radius = 48 + ring * 18;
-        const nodeId = `reel-${capture.id}`;
-        nodes.push({
-          id: nodeId,
-          type: "reel",
-          label: capture.title || "Saved Reel",
-          meta: capture.creator || capture.platform || "Source",
-          x: x + Math.cos(angle) * radius,
-          y: y + Math.sin(angle) * radius,
-          accent,
-          categoryId: category.id,
-          captureId: capture.id,
-          creator: capture.creator
-        });
-        edges.push({ id: `${category.id}-${capture.id}`, from: category.id, to: nodeId, kind: "source" });
-        if (capture.creator) creatorLinks.set(capture.creator, [...(creatorLinks.get(capture.creator) || []), nodeId]);
+    const sourcesByPrimary = new Map<string, ApiCapture[]>();
+    knowledgeCaptures.forEach((capture) => {
+      const primary = membershipBySource.get(capture.id)?.primaryCategory || capture.contentCategory || "Other";
+      sourcesByPrimary.set(primary, [...(sourcesByPrimary.get(primary) || []), capture]);
+    });
+
+    knowledgeCaptures.forEach((capture) => {
+      const membership = membershipBySource.get(capture.id);
+      const primary = membership?.primaryCategory || capture.contentCategory || "Other";
+      const categoryNode = categoryNodeByName.get(primary) || categoryNodeByName.get("Other");
+      if (!categoryNode) return;
+      const primarySources = sourcesByPrimary.get(primary) || [];
+      const sourceIndex = Math.max(0, primarySources.findIndex((item) => item.id === capture.id));
+      const angle = (sourceIndex / Math.max(1, primarySources.length)) * Math.PI * 2 - Math.PI / 2;
+      const ring = Math.floor(sourceIndex / 9);
+      const radius = 48 + ring * 18;
+      const nodeId = `reel-${capture.id}`;
+      const categoryNames = membership?.categories || [primary];
+      const categoryIds = categoryNames.map((name) => categoryNodeByName.get(name)?.id).filter(Boolean) as string[];
+      const associationCount = networkConnections.filter((connection) => connection.sourceId === capture.id || connection.targetSourceId === capture.id).length;
+      nodes.push({
+        id: nodeId,
+        type: "reel",
+        label: capture.title || "Saved Reel",
+        meta: categoryNames.join(" ↔ "),
+        x: categoryNode.x + Math.cos(angle) * radius,
+        y: categoryNode.y + Math.sin(angle) * radius,
+        accent: categoryNode.accent,
+        categoryId: categoryNode.id,
+        categoryIds,
+        captureId: capture.id,
+        creator: capture.creator,
+        bridge: categoryIds.length > 1,
+        connectionCount: associationCount
+      });
+      categoryIds.forEach((categoryId, membershipIndex) => {
+        const memberAccent = nodes.find((node) => node.id === categoryId)?.accent || categoryNode.accent;
+        edges.push({ id: `${categoryId}-${capture.id}`, from: categoryId, to: nodeId, kind: "source", accent: memberAccent, curve: membershipIndex ? .085 : .04 });
+      });
+      if (capture.creator) creatorLinks.set(capture.creator, [...(creatorLinks.get(capture.creator) || []), nodeId]);
+    });
+
+    networkConnections.forEach((connection) => {
+      const from = `reel-${connection.sourceId}`;
+      const to = `reel-${connection.targetSourceId}`;
+      if (!nodes.some((node) => node.id === from) || !nodes.some((node) => node.id === to)) return;
+      edges.push({
+        id: connection.id,
+        from,
+        to,
+        kind: "association",
+        reason: connection.reason,
+        strength: connection.strength,
+        accent: "#7f91a9",
+        curve: .14
       });
     });
 
-    const categoryIds = atlasCategories.map((category) => category.id);
-    const categoryEdgeKeys = new Set<string>();
-    const connectCategories = (from: string, to: string) => {
-      if (from === to) return;
-      const key = [from, to].sort().join("::");
-      if (categoryEdgeKeys.has(key)) return;
-      categoryEdgeKeys.add(key);
-      edges.push({ id: `brain-${key}`, from, to, kind: "category" });
-    };
-    if (categoryIds.length === 2) connectCategories(categoryIds[0], categoryIds[1]);
-    if (categoryIds.length > 2) {
-      categoryIds.forEach((categoryId, index) => connectCategories(categoryId, categoryIds[(index + 1) % categoryIds.length]));
-      if (categoryIds.length > 3) categoryIds.forEach((categoryId, index) => connectCategories(categoryId, categoryIds[(index + 2) % categoryIds.length]));
-    }
-
-    [...creatorLinks.entries()].slice(0, 6).forEach(([creator, reelIds], creatorIndex) => {
+    [...creatorLinks.entries()].filter(([, reelIds]) => reelIds.length > 1).slice(0, 6).forEach(([creator, reelIds], creatorIndex) => {
       const creatorAngle = (creatorIndex / Math.max(1, Math.min(6, creatorLinks.size))) * Math.PI * 2 - Math.PI / 2;
       const x = 500 + Math.cos(creatorAngle) * 205;
       const y = 340 + Math.sin(creatorAngle) * 155;
@@ -1137,7 +1200,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     });
 
     return { nodes, edges };
-  }, [atlasCategories, knowledgeCaptures]);
+  }, [atlasCategories, knowledgeCaptures, membershipBySource, networkConnections]);
 
   const forceData = useMemo(() => {
     const nodes = graph.nodes.map((node) => ({
@@ -1150,9 +1213,11 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
       id: edge.id,
       source: edge.from,
       target: edge.to,
-      accent: edge.kind === "category" ? "#8fb8de" : forceNodeMap.get(edge.from)?.accent || forceNodeMap.get(edge.to)?.accent || "#7fa9d4",
-      curve: (index % 2 ? 1 : -1) * (edge.kind === "category" ? .025 : .05 + (index % 3) * .014),
-      kind: edge.kind
+      accent: edge.accent || forceNodeMap.get(edge.from)?.accent || forceNodeMap.get(edge.to)?.accent || "#7fa9d4",
+      curve: edge.curve ?? (index % 2 ? 1 : -1) * (.05 + (index % 3) * .014),
+      kind: edge.kind,
+      reason: edge.reason,
+      strength: edge.strength
     }));
     return { nodes, links };
   }, [graph]);
@@ -1180,11 +1245,11 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
       charge?.strength?.((node: VaultNode) => node.type === "category" ? -54 : node.type === "creator" ? -30 : -19);
       charge?.distanceMax?.(260);
       link?.distance?.((item: VaultLink) => {
-        if (item.kind === "category") return 48;
+        if (item.kind === "association") return 54;
         if (item.kind === "creator") return 45;
         return 36;
       });
-      link?.strength?.((item: VaultLink) => item.kind === "category" ? .72 : item.kind === "source" ? .88 : .56);
+      link?.strength?.((item: VaultLink) => item.kind === "association" ? .34 : item.kind === "source" ? .88 : .5);
       graphRef.current?.d3ReheatSimulation();
     });
     return () => cancelAnimationFrame(frame);
@@ -1193,6 +1258,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
   const nodeMap = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
   const selectedNode = selectedNodeId ? nodeMap.get(selectedNodeId) || null : null;
   const selectedCapture = selectedNode?.captureId ? knowledgeCaptures.find((capture) => capture.id === selectedNode.captureId) || null : null;
+  const selectedMembership = selectedCapture ? membershipBySource.get(selectedCapture.id) || null : null;
   const selectedCategory = selectedNode?.categoryId ? atlasCategories.find((category) => category.id === selectedNode.categoryId) || null : null;
   const selectedCreatorSources = selectedNode?.type === "creator" && selectedNode.creator
     ? knowledgeCaptures.filter((capture) => capture.creator === selectedNode.creator)
@@ -1202,6 +1268,17 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     : [];
   const capturedAt = selectedCapture ? captureAsSource(selectedCapture).capturedAt : "";
   const selectedStructureSteps = selectedCapture?.structure?.split(/→|->/).map((step) => step.trim()).filter(Boolean) || [];
+  const selectedConnections = useMemo(() => {
+    if (!selectedCapture) return [];
+    return networkConnections
+      .filter((connection) => connection.sourceId === selectedCapture.id || connection.targetSourceId === selectedCapture.id)
+      .map((connection) => {
+        const relatedId = connection.sourceId === selectedCapture.id ? connection.targetSourceId : connection.sourceId;
+        return { connection, capture: knowledgeCaptures.find((capture) => capture.id === relatedId) || null };
+      })
+      .filter((item) => item.capture)
+      .sort((a, b) => b.connection.strength - a.connection.strength);
+  }, [knowledgeCaptures, networkConnections, selectedCapture]);
   const neighborIds = useMemo(() => {
     if (!selectedNodeId) return new Set<string>();
     const related = new Set<string>([selectedNodeId]);
@@ -1218,8 +1295,9 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
   }, [graph.nodes, query]);
   const selectedAccent = selectedNode?.accent || "#7fa9d4";
   const rankedCategories = useMemo(() => [...atlasCategories].sort((a, b) => b.sourceCount - a.sourceCount), [atlasCategories]);
-  const totalSources = atlasCategories.reduce((total, category) => total + category.sourceCount, 0);
-  const creatorCount = graph.nodes.filter((node) => node.type === "creator").length;
+  const totalSources = knowledgeCaptures.length;
+  const bridgeCount = networkMemberships.filter((membership) => membership.bridge).length;
+  const connectionCount = networkConnections.length;
 
   const endpointId = (endpoint: string | number | NodeObject<VaultNode> | undefined) => typeof endpoint === "object" ? String(endpoint.id) : String(endpoint ?? "");
 
@@ -1259,7 +1337,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     const isRelated = !selectedNodeId || neighborIds.has(node.id);
     const isQueryVisible = !query.trim() || queryMatches.has(node.id);
     const scale = Math.max(.72, globalScale);
-    const radius = (node.type === "category" ? 13 : node.type === "creator" ? 7.5 : 5) / scale;
+    const radius = (node.type === "category" ? 13 : node.type === "creator" ? 7.5 : node.bridge ? 6 : 5) / scale;
     const alpha = !isQueryVisible ? .04 : isRelated ? 1 : .09;
     const labelVisible = node.type === "category" || node.type === "creator" || isHovered || isSelected;
 
@@ -1284,6 +1362,19 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     context.strokeStyle = node.type === "reel" ? node.accent : "rgba(255,255,255,.94)";
     context.stroke();
 
+    if (node.type === "reel" && node.bridge && node.categoryIds?.length) {
+      const bridgeAccents = node.categoryIds.map((categoryId) => nodeMap.get(categoryId)?.accent).filter(Boolean) as string[];
+      bridgeAccents.forEach((accent, index) => {
+        const start = -Math.PI / 2 + (index / bridgeAccents.length) * Math.PI * 2;
+        const end = -Math.PI / 2 + ((index + 1) / bridgeAccents.length) * Math.PI * 2 - .08;
+        context.beginPath();
+        context.arc(node.x!, node.y!, radius + 3.2 / scale, start, end);
+        context.lineWidth = 2.3 / scale;
+        context.strokeStyle = accent;
+        context.stroke();
+      });
+    }
+
     if (isSelected) {
       context.beginPath();
       context.arc(node.x, node.y, radius + 6 / scale, 0, Math.PI * 2);
@@ -1306,7 +1397,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
       }
     }
     context.restore();
-  }, [hoveredNodeId, neighborIds, query, queryMatches, selectedNodeId]);
+  }, [hoveredNodeId, neighborIds, nodeMap, query, queryMatches, selectedNodeId]);
 
   const paintNodePointer = useCallback((rawNode: NodeObject<VaultNode>, color: string, context: CanvasRenderingContext2D, globalScale: number) => {
     const node = rawNode as VaultNode;
@@ -1340,7 +1431,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
               </button>;
             })}
           </div>
-          <div className="map-library-footer"><span><i /> Growing with every save</span><small>Spool map v1</small></div>
+          <div className="map-library-footer"><span><i /> Growing with every save</span><small>Associative map</small></div>
         </aside>
 
         <section className="vault-graph" aria-label="Knowledge categories, saved Reels, and creators">
@@ -1355,9 +1446,9 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
             <div className="map-stats" aria-label="Knowledge map statistics">
               <span><i /> <strong>{atlasCategories.length}</strong> areas</span>
               <b />
-              <span><strong>{totalSources}</strong> saved Reels</span>
+              <span><strong>{totalSources}</strong> memories</span>
               <b />
-              <span><strong>{creatorCount}</strong> creators</span>
+              <span><strong>{connectionCount}</strong> connections</span>
             </div>
             <div className="force-graph-layer" aria-hidden="true">
               <ForceGraph2D<VaultNode, VaultLink>
@@ -1378,13 +1469,17 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
                   if (query.trim() && !queryVisible) return "rgba(127,169,212,0.015)";
                   const related = !selectedNodeId || sourceId === selectedNodeId || targetId === selectedNodeId;
                   if (!related) return "rgba(127,169,212,0.035)";
-                  return link.kind === "category" ? "rgba(127,169,212,.36)" : `${link.accent}58`;
+                  if (link.kind === "association") return selectedNodeId ? "rgba(72,92,119,.54)" : "rgba(72,92,119,.16)";
+                  return `${link.accent}58`;
                 }}
                 linkWidth={(rawLink) => {
                   const link = rawLink as VaultLink;
                   const related = !selectedNodeId || endpointId(link.source) === selectedNodeId || endpointId(link.target) === selectedNodeId;
-                  return related ? link.kind === "category" ? 1.3 : .95 : .4;
+                  if (!related) return .35;
+                  return link.kind === "association" ? selectedNodeId ? 1.35 : .7 : .95;
                 }}
+                linkLineDash={(rawLink) => (rawLink as VaultLink).kind === "association" ? [2.5, 3.5] : []}
+                linkLabel={(rawLink) => (rawLink as VaultLink).reason || ""}
                 linkCurvature={(rawLink) => (rawLink as VaultLink).curve}
                 minZoom={.55}
                 maxZoom={4.5}
@@ -1411,9 +1506,10 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
             {query.trim() && !queryMatches.size ? <div className="vault-empty"><Search size={18} /><strong>No matching nodes</strong><span>Try a category or creator name.</span></div> : null}
             <div className="map-type-legend">
               <strong>Map key</strong>
-              <span><i className="category" /> knowledge area</span><span><i className="reel" /> saved Reel</span><span><i className="creator" /> creator</span>
+              <span><i className="category" /> knowledge area</span><span><i className="reel" /> saved Reel</span><span><i className="bridge" /> bridge memory</span><span><i className="connection" /> related idea</span>
+              <small>{bridgeCount} {bridgeCount === 1 ? "memory touches" : "memories touch"} more than one area</small>
             </div>
-            <div className="map-canvas-hint">Drag to move · Scroll to zoom · Select a memory</div>
+            <div className="map-canvas-hint">Drag to move · Scroll to zoom · Select a memory to reveal its threads</div>
             {selectedNode ? <button className="map-reset" onClick={resetGraph}><RefreshCw size={13} /> Reset focus</button> : null}
           </div>
         </section>
@@ -1422,14 +1518,16 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
           <header><span>{selectedCapture ? `${selectedCapture.title || "Saved Reel"}.md` : `${selectedNode.label}.md`}</span><button aria-label="Close note" onClick={resetGraph}><X size={15} /></button></header>
           <div className="vault-note-body">
             {selectedCapture ? <>
-              <span className="vault-note-path">Knowledge / {selectedCategory?.name || "Other"}</span>
+              <span className="vault-note-path">Knowledge / {(selectedMembership?.categories || [selectedCategory?.name || "Other"]).join(" ↔ ")}</span>
               <h2>{selectedCapture.title || "Saved Reel"}</h2>
-              <div className="vault-note-tags"><span>{selectedCapture.creator || "Unknown creator"}</span><span>{selectedCategory?.name || "Other"}</span><span>{capturedAt}</span><span>{selectedCapture.platform || "Web"}</span></div>
+              <div className="vault-note-tags"><span>{selectedCapture.creator || "Unknown creator"}</span>{(selectedMembership?.categories || [selectedCategory?.name || "Other"]).map((category) => <span key={category}>{category}</span>)}<span>{capturedAt}</span><span>{selectedCapture.platform || "Web"}</span></div>
               <h3>The idea</h3><p className="vault-note-lede">{selectedCapture.summary || "Spool is still reading this source."}</p>
+              {selectedMembership?.bridge ? <div className="vault-bridge-note"><small><Link2 size={11} /> WHY THIS IS A BRIDGE</small>{selectedMembership.categories.map((category) => <div key={category}><i style={{ "--bridge-accent": categoryAccents[category] || categoryAccents.Other } as React.CSSProperties} /><span><strong>{category}</strong>{selectedMembership.reasons[category]}</span></div>)}</div> : null}
               {selectedCapture.hook ? <div className="vault-hook"><small>Opening hook</small><p>“{selectedCapture.hook}”</p></div> : null}
               {selectedCapture.takeaways?.length ? <><h3>What it teaches</h3><ul className="vault-lesson-list">{selectedCapture.takeaways.map((takeaway) => <li key={takeaway}><Check size={11} /><span>{takeaway}</span></li>)}</ul></> : null}
               {selectedStructureSteps.length > 1 ? <><h3>How it unfolds</h3><ol className="vault-structure">{selectedStructureSteps.slice(0, 7).map((step, index) => <li key={`${step}-${index}`}><span>{index + 1}</span><p>{step}</p></li>)}</ol></> : null}
               {selectedCapture.action ? <div className="vault-try"><Feather size={13} /><span><strong>Try this</strong>{selectedCapture.action}</span></div> : null}
+              {selectedConnections.length ? <><h3>Connected memories</h3><div className="vault-related-memories">{selectedConnections.map(({ connection, capture }) => <button key={connection.id} onClick={() => chooseNode(`reel-${capture!.id}`)}><i style={{ "--bridge-accent": categoryAccents[membershipBySource.get(capture!.id)?.primaryCategory || capture!.contentCategory || "Other"] || categoryAccents.Other } as React.CSSProperties} /><span><strong>{capture!.title || "Saved Reel"}</strong><small>{connection.reason}</small></span><ChevronRight size={12} /></button>)}</div></> : null}
               {selectedCapture.sharedText ? <div className="vault-saved-because"><strong>WHY YOU SAVED THIS</strong><p>{selectedCapture.sharedText}</p></div> : null}
               {selectedCapture.transcript ? <details className="vault-transcript"><summary><FileText size={12} /> Read full transcript</summary><p>{selectedCapture.transcript}</p></details> : null}
               <div className="vault-note-actions"><a href={selectedCapture.url} target="_blank" rel="noreferrer">Open original <ExternalLink size={12} /></a>{!selectedCapture.transcript ? <button onClick={() => onTranscribe(selectedCapture)}><AudioLines size={12} /> Transcribe</button> : null}</div>

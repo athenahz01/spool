@@ -835,7 +835,7 @@ h1, h2, h3, .brand-name, .mobile-brand > span, .capture-row-copy strong, .empty-
   z-index: 7;
   right: 14px;
   bottom: 14px;
-  width: 130px;
+  width: 158px;
   display: grid;
   gap: 8px;
   padding: 12px;
@@ -852,7 +852,9 @@ h1, h2, h3, .brand-name, .mobile-brand > span, .capture-row-copy strong, .empty-
 .map-type-legend i { width: 7px; height: 7px; border-radius: 50%; }
 .map-type-legend i.category { background: var(--butter); box-shadow: 0 0 0 3px rgba(243,217,121,.16); }
 .map-type-legend i.reel { background: #fff; border: 2px solid var(--denim); }
-.map-type-legend i.creator { background: var(--denim); box-shadow: 0 0 0 3px rgba(127,169,212,.13); }
+.map-type-legend i.bridge { width: 9px; height: 9px; background: conic-gradient(var(--butter) 0 50%, var(--baby-blue) 50%); border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(82,125,168,.2); }
+.map-type-legend i.connection { width: 13px; height: 1px; background: repeating-linear-gradient(90deg, rgba(72,92,119,.72) 0 3px, transparent 3px 5px); border-radius: 0; }
+.map-type-legend > small { margin-top: 2px; padding-top: 8px; color: var(--ghost); border-top: 1px solid var(--line-soft); font-size: 6px; line-height: 1.5; }
 .map-canvas-hint { position: absolute; z-index: 5; left: 14px; bottom: 14px; color: var(--ghost); font: 7px ui-monospace, monospace; }
 .map-reset {
   position: absolute;
@@ -892,6 +894,20 @@ h1, h2, h3, .brand-name, .mobile-brand > span, .capture-row-copy strong, .empty-
 .knowledge-vault-page .vault-note > header { border-radius: 9px 9px 0 0; }
 .knowledge-vault-page .vault-note-body { padding: 24px 22px 48px; }
 .knowledge-vault-page .vault-note h2 { font-size: 22px; }
+.vault-bridge-note { display: grid; gap: 8px; margin: 18px 0 2px; padding: 12px; background: rgba(175,203,231,.09); border: 1px solid rgba(82,125,168,.12); border-radius: 7px; }
+.vault-bridge-note > small { display: flex; align-items: center; gap: 5px; color: #527da8; font-size: 6px; font-weight: 740; letter-spacing: .09em; }
+.vault-bridge-note > div { display: grid; grid-template-columns: 8px minmax(0,1fr); gap: 8px; align-items: start; }
+.vault-bridge-note i,
+.vault-related-memories i { width: 7px; height: 7px; margin-top: 3px; background: var(--bridge-accent); border-radius: 50%; box-shadow: 0 0 0 3px color-mix(in srgb, var(--bridge-accent) 12%, transparent); }
+.vault-bridge-note span { color: var(--ghost); font-size: 7px; line-height: 1.45; }
+.vault-bridge-note span strong { display: block; margin-bottom: 1px; color: var(--copy); font-size: 8px; }
+.vault-related-memories { display: grid; border-top: 1px solid var(--line-soft); }
+.vault-related-memories button { min-height: 56px; display: grid; grid-template-columns: 9px minmax(0,1fr) 14px; gap: 9px; align-items: center; padding: 8px 2px; color: var(--copy); background: transparent; border: 0; border-bottom: 1px solid var(--line-soft); cursor: pointer; text-align: left; transition: background 150ms ease-out, padding 150ms ease-out; }
+.vault-related-memories button:hover { padding-inline: 7px; background: rgba(175,203,231,.08); }
+.vault-related-memories button > span { min-width: 0; }
+.vault-related-memories strong { display: block; overflow: hidden; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.vault-related-memories small { display: -webkit-box; margin-top: 3px; overflow: hidden; color: var(--ghost); font-size: 7px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.vault-related-memories svg { color: var(--ghost); }
 
 @media (max-width: 820px) {
   .knowledge-vault-page { height: calc(100vh - 46px); min-height: 620px; padding: 8px 8px 86px; }

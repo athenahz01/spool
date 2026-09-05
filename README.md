@@ -5,7 +5,8 @@ Spool turns explicitly shared Instagram Reels, creator profiles, YouTube videos,
 ## What is implemented
 
 - Responsive briefing focused on synthesized ideas, not an inbox
-- A Playbooks-first Second Brain with six outcome-based guides, the connected Map, and a filterable Sources ledger
+- A Playbooks-first Second Brain with six outcome-based guides, an associative Map, and a filterable Sources ledger
+- Evidence-backed bridge memories that can belong to several knowledge areas, plus restrained Reel-to-Reel connections with visible reasons
 - Deterministic knowledge facets (domain, type, use case, evidence, freshness) plus a Recovery Inbox for incomplete sources
 - Living playbooks that merge existing summaries, takeaways, structures, actions, and transcripts without another Claude call
 - Copyable and downloadable Markdown playbooks, with expandable source notes that retain their evidence trail

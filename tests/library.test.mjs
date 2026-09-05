@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 process.env.VERCEL = "1";
-const { buildAskSourceContext, buildLibrary } = await import("../server.mjs");
+const { buildAskSourceContext, buildKnowledgeNetwork, buildLibrary } = await import("../server.mjs");
 
 const ready = (overrides) => ({
   id: crypto.randomUUID(),
@@ -81,4 +81,23 @@ test("Ask Spool sends only compact ready notes in relevance order", () => {
   assert.match(result.context, /^\[1\]\nTitle: First result/);
   assert.ok(!result.context.includes("x".repeat(100)));
   assert.ok(!result.context.includes("y".repeat(100)));
+});
+
+test("knowledge network creates evidence-backed bridges without forcing unrelated links", () => {
+  const captures = [
+    ready({ id: "ai-startup", contentCategory: "AI Products", title: "AI agent MVP for founders", topic: "AI startup validation", summary: "Build an AI agent after customer discovery validates a founder pain point.", takeaways: ["Test the MVP with early users."], action: "Launch to first customers." }),
+    ready({ id: "startup-ai", contentCategory: "Startups", title: "Validate an AI assistant before launch", topic: "Founder product validation", summary: "A founder validates an AI automation MVP with customer discovery before launch.", takeaways: ["Interview early users before coding."], action: "Run five validation calls." }),
+    ready({ id: "vlog-content", contentCategory: "Vlogs & Life", title: "Day in the life Reel editing", topic: "Lifestyle storytelling", summary: "A day in the life vlog uses a sharp hook, voiceover, and video editing for pacing." }),
+    ready({ id: "recruiting-only", contentCategory: "Recruiting", title: "Prepare for a recruiter interview", topic: "Interview preparation", summary: "Practice concise examples before a recruiter interview." }),
+    ready({ id: "reflection-only", contentCategory: "Personal Growth", title: "A quiet journaling habit", topic: "Weekly reflection", summary: "A private journaling habit supports reflection and confidence." })
+  ];
+  const network = buildKnowledgeNetwork(captures);
+  const aiMembership = network.memberships.find((item) => item.sourceId === "ai-startup");
+  const vlogMembership = network.memberships.find((item) => item.sourceId === "vlog-content");
+  const recruitingMembership = network.memberships.find((item) => item.sourceId === "recruiting-only");
+  assert.deepEqual(aiMembership.categories, ["AI Products", "Startups"]);
+  assert.deepEqual(vlogMembership.categories, ["Vlogs & Life", "Content Creation"]);
+  assert.deepEqual(recruitingMembership.categories, ["Recruiting"]);
+  assert.ok(network.connections.some((connection) => connection.sourceId === "ai-startup" && connection.targetSourceId === "startup-ai" && connection.crossesAreas));
+  assert.ok(!network.connections.some((connection) => [connection.sourceId, connection.targetSourceId].includes("reflection-only") && [connection.sourceId, connection.targetSourceId].includes("recruiting-only")));
 });

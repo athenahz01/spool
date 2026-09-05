@@ -51,6 +51,17 @@ Spool, saved Reels, fragments, threads, chapters, patterns, supporting saves, cr
 - New captures keep the existing single analysis pipeline; this interface must not add a second AI pass.
 - Signature: a thin source-colored spine runs beside the reading surface, connecting the practical guide back to its evidence without recreating the graph.
 
+## Current Map direction — Associative memory network
+
+- A saved Reel is one memory, not one dot per folder. It may belong to one primary knowledge area plus up to two evidence-backed secondary areas.
+- Multi-area Reels are `bridge memories`: place them between their areas and render a segmented category-color ring so the overlap is legible before selection.
+- Knowledge areas connect only through real bridge memories. Do not draw a synthetic category ring or invent an edge just to keep every cluster attached.
+- Reel-to-Reel associations require specific evidence already stored in Spool: a shared concrete tool, several uncommon concepts, a strongly matched playbook plus supporting evidence, or creator continuity plus a shared concept.
+- Cap each Reel at four direct associations. Keep those lines thin and dashed at rest, then reveal the useful local neighborhood when a memory is selected.
+- Every selected bridge or association must explain why it exists in plain language and link to the related source note. A hidden similarity score is never sufficient UX.
+- Cost rule: area membership and Reel associations are calculated locally from existing summaries, takeaways, structures, actions, captions, notes, and transcripts. They must never initiate Claude or Supadata work.
+- Signature: category nodes are islands, bridge memories are stepping stones, and selected association threads behave like quiet pencil marks across the cream map.
+
 ## Current creation direction — Creation Banks
 
 - Creation Banks are a daily creation workspace, separate from Second Brain learning but powered by the same saved captures.

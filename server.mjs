@@ -145,6 +145,161 @@ function inferKnowledgeDomains(capture) {
   return [...domains.size ? domains : new Set([category])];
 }
 
+const knowledgeAreaSignals = {
+  "AI Products": [
+    ["AI systems", /\b(ai|artificial intelligence|machine learning|ml model|llm|transformer|neural network)\b/, 4],
+    ["agents and automation", /\b(ai agent|agentic|automation|automate|claude|codex|prompt engineering)\b/, 4],
+    ["software building", /\b(app|software|tool|prototype|coding|codebase|developer)\b/, 1.5]
+  ],
+  Recruiting: [
+    ["hiring and interviews", /\b(recruit|recruiter|hiring|interview|internship|job search|job application)\b/, 4],
+    ["outreach", /\b(cold email|networking|coffee chat|referral|candidate|applicant)\b/, 4],
+    ["application materials", /\b(resume|résumé|cover letter)\b/, 3]
+  ],
+  Startups: [
+    ["founder building", /\b(startup|founder|venture|entrepreneur|bootstrapp)\w*\b/, 4],
+    ["validation", /\b(mvp|validation|validate|customer discovery|product.market fit|market gap|pain point)\b/, 4],
+    ["launch and growth", /\b(fundrais|business model|go.to.market|launch strategy|first customers?|early users?)\w*\b/, 3]
+  ],
+  "Vlogs & Life": [
+    ["life documentation", /\b(vlog|day in the life|daily life|lifestyle|ootd|outfit diary)\b/, 4],
+    ["personal moments", /\b(routine|travel|outfit|graduation|milestone|week in my life|morning routine|night routine)\b/, 3],
+    ["personal narration", /\b(voiceover diary|come with me|spend the day|personal story)\b/, 3]
+  ],
+  "Content Creation": [
+    ["hooks and scripts", /\b(hook|script|storytelling|content strategy|content engine|carousel|talking.head)\b/, 4],
+    ["audience and publishing", /\b(audience|posting|publish|engagement|algorithm|creator growth|social media)\b/, 3],
+    ["video craft", /\b(video edit|editing order|voiceover|b.roll|pacing|shot list|camera angle)\b/, 3]
+  ],
+  Career: [
+    ["career development", /\b(career|professional|workplace|promotion|manager|leadership|career change)\b/, 4],
+    ["proof of work", /\b(portfolio|project website|case study|personal brand|resume project)\b/, 3],
+    ["work opportunities", /\b(job opportunity|role|work experience)\b/, 2]
+  ],
+  "Personal Growth": [
+    ["personal growth", /\b(personal growth|self.improvement|mindset|confidence|wellbeing|wellness)\b/, 4],
+    ["habits and reflection", /\b(habit|journaling|reflection|discipline|motivation|productivity)\b/, 3]
+  ]
+};
+
+function inferKnowledgeAreaMembership(capture) {
+  const primaryCategory = capture.contentCategory || inferContentCategory(capture);
+  const text = captureSearchText(capture);
+  const candidates = Object.entries(knowledgeAreaSignals)
+    .filter(([category]) => category !== primaryCategory)
+    .map(([category, definitions]) => {
+      const matches = definitions.filter(([, pattern]) => pattern.test(text));
+      return {
+        category,
+        score: matches.reduce((total, [, , weight]) => total + weight, 0),
+        signals: matches.map(([label]) => label)
+      };
+    })
+    .filter((candidate) => candidate.score >= 4)
+    .sort((a, b) => b.score - a.score || a.category.localeCompare(b.category))
+    .slice(0, 2);
+  const categories = [primaryCategory, ...candidates.map((candidate) => candidate.category)];
+  const reasons = Object.fromEntries([
+    [primaryCategory, "Primary subject"],
+    ...candidates.map((candidate) => [candidate.category, `Touches ${candidate.signals.join(" and ")}`])
+  ]);
+  return { sourceId: capture.id, primaryCategory, categories, reasons, bridge: categories.length > 1 };
+}
+
+const connectionStopWords = new Set([
+  "about", "after", "also", "assisted", "based", "because", "before", "both", "build", "building", "built", "comments", "content", "could", "create", "creating", "creator", "each", "exactly", "first", "from", "have", "idea", "ideas", "instead", "into", "learn", "like", "make", "month", "more", "multiple", "need", "only", "over", "people", "personal", "plain", "process", "ready", "reel", "reels", "result", "results", "saved", "shares", "should", "shows", "simple", "system", "that", "their", "them", "then", "they", "this", "three", "through", "tool", "tools", "turn", "used", "uses", "using", "video", "what", "when", "where", "which", "with", "work", "works", "your"
+]);
+
+function connectionConcepts(capture) {
+  const text = [capture.title, capture.topic, capture.summary, ...(capture.takeaways || [])].filter(Boolean).join(" ").toLowerCase();
+  return new Set(text.replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter((token) => token.length >= 4 && !connectionStopWords.has(token)));
+}
+
+function strongPlaybookMatches(capture) {
+  const text = captureSearchText(capture);
+  return playbookDefinitions.filter((definition) => definition.keywords.filter((keyword) => text.includes(keyword)).length >= 2);
+}
+
+function mentionsKnownTool(capture, tool) {
+  const escaped = tool.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+  return new RegExp(`\\b${escaped}\\b`, "i").test(captureSearchText(capture));
+}
+
+export function buildKnowledgeNetwork(captures) {
+  const ready = captures.filter((capture) => capture.status === "ready" && hasIntent(capture, "knowledge"));
+  const memberships = ready.map((capture) => inferKnowledgeAreaMembership(capture));
+  const membershipBySource = new Map(memberships.map((membership) => [membership.sourceId, membership]));
+  const candidates = [];
+
+  for (let leftIndex = 0; leftIndex < ready.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < ready.length; rightIndex += 1) {
+      const left = ready[leftIndex];
+      const right = ready[rightIndex];
+      const leftMembership = membershipBySource.get(left.id);
+      const rightMembership = membershipBySource.get(right.id);
+      const sharedCategories = leftMembership.categories.filter((category) => category !== "Other" && rightMembership.categories.includes(category));
+      const crossesAreas = leftMembership.primaryCategory !== rightMembership.primaryCategory;
+      const sharedDomains = inferKnowledgeDomains(left).filter((domain) => inferKnowledgeDomains(right).includes(domain));
+      const sharedTools = knownTools.filter((tool) => mentionsKnownTool(left, tool) && mentionsKnownTool(right, tool));
+      const specificTools = sharedTools.filter((tool) => tool !== "Claude");
+      const sharedPlaybooks = strongPlaybookMatches(left).filter((definition) => strongPlaybookMatches(right).some((other) => other.id === definition.id));
+      const rightConcepts = connectionConcepts(right);
+      const sharedConcepts = [...connectionConcepts(left)].filter((concept) => rightConcepts.has(concept)).slice(0, 4);
+      const sameCreator = left.creator && right.creator && left.creator === right.creator && !/unknown|instagram creator/i.test(left.creator);
+      const hasSpecificEvidence = specificTools.length > 0
+        || sharedConcepts.length >= 3
+        || (sameCreator && sharedConcepts.length > 0)
+        || (sharedPlaybooks.length > 0 && (sharedConcepts.length >= 2 || sharedTools.length > 0));
+      if (!hasSpecificEvidence) continue;
+      const score = (sharedCategories.length * (crossesAreas ? 1 : .5))
+        + (sharedDomains.length * .5)
+        + (specificTools.length * 4)
+        + (sharedTools.includes("Claude") ? 1.25 : 0)
+        + (sharedPlaybooks.length * 1.5)
+        + (sharedConcepts.length * 1.2)
+        + (sameCreator ? 2 : 0);
+      if (score < 5) continue;
+      const signals = uniqueText([
+        sharedCategories.map((category) => `${category} overlap`),
+        sharedPlaybooks.map((definition) => definition.title),
+        sharedTools,
+        sharedConcepts.slice(0, 3)
+      ], 5);
+      const reason = specificTools.length
+        ? `Both use ${specificTools.slice(0, 2).join(" and ")}${crossesAreas ? ` across ${leftMembership.primaryCategory} and ${rightMembership.primaryCategory}` : ""}.`
+        : sharedPlaybooks.length
+          ? `Both contribute to “${sharedPlaybooks[0].title}.”`
+          : crossesAreas
+            ? `Connects ${leftMembership.primaryCategory} with ${rightMembership.primaryCategory} through ${sharedConcepts.slice(0, 3).join(", ")}.`
+            : `Shared thread: ${sharedConcepts.slice(0, 3).join(", ")}.`;
+      candidates.push({
+        id: `connection-${[left.id, right.id].sort().join("-")}`,
+        sourceId: left.id,
+        targetSourceId: right.id,
+        strength: Number(score.toFixed(2)),
+        reason,
+        signals,
+        sharedCategories,
+        crossesAreas
+      });
+    }
+  }
+
+  const degree = new Map();
+  const connections = candidates
+    .sort((a, b) => b.strength - a.strength || a.id.localeCompare(b.id))
+    .filter((connection) => {
+      const leftDegree = degree.get(connection.sourceId) || 0;
+      const rightDegree = degree.get(connection.targetSourceId) || 0;
+      if (leftDegree >= 4 || rightDegree >= 4) return false;
+      degree.set(connection.sourceId, leftDegree + 1);
+      degree.set(connection.targetSourceId, rightDegree + 1);
+      return true;
+    });
+
+  return { memberships, connections };
+}
+
 function inferUseCases(capture) {
   const text = captureSearchText(capture);
   const useCases = new Set(["Learn"]);
@@ -801,9 +956,12 @@ export function buildLibrary(captures) {
       topicGroup.push(capture);
       byTopic.set(topic, topicGroup);
 
-      const categoryGroup = byCategory.get(capture.contentCategory) || [];
-      categoryGroup.push(capture);
-      byCategory.set(capture.contentCategory, categoryGroup);
+      const membership = inferKnowledgeAreaMembership(capture);
+      membership.categories.forEach((category) => {
+        const categoryGroup = byCategory.get(category) || [];
+        categoryGroup.push(capture);
+        byCategory.set(category, categoryGroup);
+      });
     }
 
     if (hasIntent(capture, "creator")) {
@@ -967,8 +1125,9 @@ export function buildLibrary(captures) {
   }).sort((a, b) => b.sourceCount - a.sourceCount);
 
   const recovery = knowledgeItems.filter((item) => item.status !== "ready");
+  const network = buildKnowledgeNetwork(captures);
 
-  return { captures, threads, creators, categories, playbooks, knowledgeItems, recovery };
+  return { captures, threads, creators, categories, playbooks, knowledgeItems, recovery, ...network };
 }
 
 export async function handleApi(req, res, pathname, schedule = (work) => void work) {
