@@ -59,7 +59,7 @@ test("buildLibrary creates playbooks and facets without calling a paid service",
   try {
     const library = buildLibrary(captures);
     assert.equal(fetchCalls, 0);
-    assert.equal(library.playbooks.length, 6);
+    assert.equal(library.playbooks.length, 10);
     assert.ok(library.playbooks.find((item) => item.id === "run-small-ai-team")?.sourceIds.includes("agent-source"));
     assert.ok(library.playbooks.find((item) => item.id === "personal-content-engine")?.sourceIds.includes("content-source"));
     assert.equal(library.recovery.length, 1);
@@ -68,6 +68,25 @@ test("buildLibrary creates playbooks and facets without calling a paid service",
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test("focused playbooks surface new recurring themes without swallowing an entire category", () => {
+  const captures = [
+    ready({ id: "networking", contentCategory: "Career", title: "Three networking questions", topic: "Better networking conversations", summary: "Replace small talk with a thoughtful career decision question." }),
+    ready({ id: "sql", contentCategory: "Career", title: "Learn SQL and Python", topic: "Data analyst roadmap", summary: "Learn SQL joins, Python pandas, analytics, and data cleaning." }),
+    ready({ id: "unrelated-career", contentCategory: "Career", title: "Negotiate a promotion", topic: "Compensation", summary: "Prepare evidence for a compensation conversation." }),
+    ready({ id: "brand", contentCategory: "Startups", title: "Build a brand identity", topic: "Branding", summary: "Choose brand identity words, fonts, and colors for a memorable niche." }),
+    ready({ id: "foundations", contentCategory: "AI Products", title: "How LLM tokens work", topic: "AI fundamentals", summary: "Explain how an LLM predicts each token with a transformer model." })
+  ];
+  const library = buildLibrary(captures);
+  const networking = library.playbooks.find((item) => item.id === "network-with-substance");
+  const data = library.playbooks.find((item) => item.id === "build-data-fluency");
+  assert.ok(networking.sourceIds.includes("networking"));
+  assert.ok(!networking.sourceIds.includes("unrelated-career"));
+  assert.ok(data.sourceIds.includes("sql"));
+  assert.ok(!data.sourceIds.includes("unrelated-career"));
+  assert.ok(library.playbooks.find((item) => item.id === "shape-memorable-brand")?.sourceIds.includes("brand"));
+  assert.ok(library.playbooks.find((item) => item.id === "understand-ai-foundations")?.sourceIds.includes("foundations"));
 });
 
 test("Ask Spool sends only compact ready notes in relevance order", () => {

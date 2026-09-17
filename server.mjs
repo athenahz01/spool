@@ -360,6 +360,54 @@ const playbookDefinitions = [
     missingPieces: ["A portfolio story template", "Examples of strong project metrics", "A follow-up sequence for outreach"]
   },
   {
+    id: "network-with-substance",
+    title: "Network with substance",
+    outcome: "Replace forgettable small talk with thoughtful questions, useful follow-ups, and relationships that compound.",
+    description: "Conversation starters, introductions, outreach, and relationship-building patterns from your newest career saves.",
+    accent: "#e7a28f",
+    categories: ["Career", "Recruiting", "Startups"],
+    keywords: ["network", "small talk", "introduce yourself", "cold email", "relationship building", "career decision", "conversation starter"],
+    focusedMinimumHits: 1,
+    fallbackWorkflow: ["Choose one question that invites a real story instead of a résumé recap.", "Listen for a problem, decision, or priority you can follow up on.", "Offer one specific form of help before asking for anything.", "Record the useful context while it is fresh.", "Follow up with a detail from the conversation so the relationship feels remembered."],
+    missingPieces: ["A short follow-up note template", "A lightweight relationship log", "Examples of useful, non-transactional offers"]
+  },
+  {
+    id: "build-data-fluency",
+    title: "Build data fluency",
+    outcome: "Turn SQL, Python, analytics, and AI-assisted data skills into visible, interview-ready proof.",
+    description: "Learning sequences, practical tools, cleaning workflows, and portfolio directions for data-oriented work.",
+    accent: "#9bbde0",
+    categories: ["Career", "AI Products"],
+    keywords: ["sql", "python", "data analyst", "analytics", "excel", "pandas", "data cleaning", "github"],
+    focusedMinimumHits: 1,
+    fallbackWorkflow: ["Start with SQL joins, grouping, and window functions.", "Add Python and pandas for cleaning and analysis.", "Use AI to review attempts after you have written your own solution.", "Build one compact project around messy real-world data.", "Publish the question, method, result, and trade-offs as career proof."],
+    missingPieces: ["One real dataset worth cleaning", "A project write-up template", "A clear interview-practice loop"]
+  },
+  {
+    id: "shape-memorable-brand",
+    title: "Shape a memorable brand",
+    outcome: "Make your work recognizable through a clear point of view, repeatable identity, and niche-specific content.",
+    description: "Brand feelings, visual identity, niche positioning, and audience cues that recur across your saves.",
+    accent: "#e5c957",
+    categories: ["Startups", "Content Creation"],
+    keywords: ["brand identity", "branding", "niche", "positioning", "audience", "customer avatar", "fonts", "colors"],
+    focusedMinimumHits: 2,
+    fallbackWorkflow: ["Name three feelings or traits the brand should consistently evoke.", "Choose a narrow audience problem you can credibly own.", "Set a small repeatable visual kit instead of redesigning every post.", "Create two or three signature content formats that express the same point of view.", "Review whether each public touchpoint feels like the same person or product."],
+    missingPieces: ["A one-page brand brief", "Examples of your strongest visual references", "A rule for deciding what does not fit the brand"]
+  },
+  {
+    id: "understand-ai-foundations",
+    title: "Understand AI foundations",
+    outcome: "Move from AI vocabulary to mental models you can explain, test, and use when building products.",
+    description: "LLMs, tokens, transformers, RAG, machine-learning algorithms, and practical analogies from your technical saves.",
+    accent: "#8cbdae",
+    categories: ["AI Products"],
+    keywords: ["llm", "token", "transformer", "rag", "machine learning", "algorithm", "ai fundamentals", "model"],
+    focusedMinimumHits: 2,
+    fallbackWorkflow: ["Explain the concept in plain language before reaching for implementation details.", "Identify its input, transformation, and output.", "Build or sketch the smallest example that makes the mechanism visible.", "Compare where the mental model is useful and where it breaks.", "Connect the concept to one product decision you are currently making."],
+    missingPieces: ["A glossary in your own words", "Small runnable examples", "A map from concepts to product trade-offs"]
+  },
+  {
     id: "create-lifestyle-reels",
     title: "Create lifestyle Reels",
     outcome: "Turn an ordinary day, outfit, or event into a Reel with a natural beginning, progression, and close.",
@@ -481,6 +529,7 @@ function matchesPlaybook(capture, definition) {
   const text = captureSearchText(capture);
   const categoryMatch = definition.categories.includes(category);
   const keywordHits = definition.keywords.filter((keyword) => text.includes(keyword)).length;
+  if (definition.focusedMinimumHits) return (categoryMatch && keywordHits >= definition.focusedMinimumHits) || keywordHits >= definition.focusedMinimumHits + 1;
   if (definition.id === "run-small-ai-team") return (categoryMatch && keywordHits >= 1) || keywordHits >= 3;
   return categoryMatch || keywordHits >= 3;
 }

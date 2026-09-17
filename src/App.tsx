@@ -1049,7 +1049,9 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     intents: ["knowledge"]
   })), []);
 
-  const knowledgeCaptures = library.categories.length ? library.captures : demoCaptures;
+  const baseKnowledgeCaptures = useMemo(() => library.categories.length
+    ? library.captures.filter((capture) => capture.intents?.includes("knowledge"))
+    : demoCaptures, [demoCaptures, library.captures, library.categories.length]);
   const atlasCategories = useMemo<ApiCategory[]>(() => {
     if (library.categories.length) return library.categories;
     const grouped = new Map<string, ApiCapture[]>();
@@ -1096,14 +1098,19 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
 
   const networkMemberships = useMemo<ApiKnowledgeMembership[]>(() => {
     if (library.memberships?.length) return library.memberships;
-    return knowledgeCaptures.map((capture) => ({
+    return baseKnowledgeCaptures.filter((capture) => capture.status === "ready").map((capture) => ({
       sourceId: capture.id,
       primaryCategory: capture.contentCategory || "Other",
       categories: [capture.contentCategory || "Other"],
       reasons: { [capture.contentCategory || "Other"]: "Primary subject" },
       bridge: false
     }));
-  }, [knowledgeCaptures, library.memberships]);
+  }, [baseKnowledgeCaptures, library.memberships]);
+
+  const knowledgeCaptures = useMemo(() => {
+    const mappedSourceIds = new Set(networkMemberships.map((membership) => membership.sourceId));
+    return baseKnowledgeCaptures.filter((capture) => mappedSourceIds.has(capture.id));
+  }, [baseKnowledgeCaptures, networkMemberships]);
 
   const membershipBySource = useMemo(() => new Map(networkMemberships.map((membership) => [membership.sourceId, membership])), [networkMemberships]);
   const networkConnections = library.connections || [];
@@ -1116,8 +1123,8 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
 
     atlasCategories.forEach((category, categoryIndex) => {
       const categoryAngle = (categoryIndex / Math.max(1, atlasCategories.length)) * Math.PI * 2 - Math.PI / 2;
-      const x = 500 + Math.cos(categoryAngle) * 132;
-      const y = 340 + Math.sin(categoryAngle) * 102;
+      const x = 500 + Math.cos(categoryAngle) * 270;
+      const y = 340 + Math.sin(categoryAngle) * 205;
       const accent = categoryAccents[category.name] || categoryAccents.Other;
       categoryNodeByName.set(category.name, { id: category.id, x, y, accent });
       nodes.push({
@@ -1132,10 +1139,12 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
       });
     });
 
-    const sourcesByPrimary = new Map<string, ApiCapture[]>();
+    const sourcesByAnchor = new Map<string, ApiCapture[]>();
     knowledgeCaptures.forEach((capture) => {
-      const primary = membershipBySource.get(capture.id)?.primaryCategory || capture.contentCategory || "Other";
-      sourcesByPrimary.set(primary, [...(sourcesByPrimary.get(primary) || []), capture]);
+      const membership = membershipBySource.get(capture.id);
+      const primary = membership?.primaryCategory || capture.contentCategory || "Other";
+      const anchorKey = (membership?.categories || [primary]).slice().sort().join("|");
+      sourcesByAnchor.set(anchorKey, [...(sourcesByAnchor.get(anchorKey) || []), capture]);
     });
 
     knowledgeCaptures.forEach((capture) => {
@@ -1143,22 +1152,29 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
       const primary = membership?.primaryCategory || capture.contentCategory || "Other";
       const categoryNode = categoryNodeByName.get(primary) || categoryNodeByName.get("Other");
       if (!categoryNode) return;
-      const primarySources = sourcesByPrimary.get(primary) || [];
-      const sourceIndex = Math.max(0, primarySources.findIndex((item) => item.id === capture.id));
-      const angle = (sourceIndex / Math.max(1, primarySources.length)) * Math.PI * 2 - Math.PI / 2;
-      const ring = Math.floor(sourceIndex / 9);
-      const radius = 48 + ring * 18;
       const nodeId = `reel-${capture.id}`;
       const categoryNames = membership?.categories || [primary];
       const categoryIds = categoryNames.map((name) => categoryNodeByName.get(name)?.id).filter(Boolean) as string[];
+      const anchorNodes = categoryNames.map((name) => categoryNodeByName.get(name)).filter(Boolean) as Array<{ id: string; x: number; y: number; accent: string }>;
+      const anchorX = anchorNodes.reduce((total, node) => total + node.x, 0) / Math.max(1, anchorNodes.length);
+      const anchorY = anchorNodes.reduce((total, node) => total + node.y, 0) / Math.max(1, anchorNodes.length);
+      const anchorKey = categoryNames.slice().sort().join("|");
+      const anchorSources = sourcesByAnchor.get(anchorKey) || [];
+      const sourceIndex = Math.max(0, anchorSources.findIndex((item) => item.id === capture.id));
+      const ringCapacity = categoryIds.length > 1 ? 8 : 12;
+      const ring = Math.floor(sourceIndex / ringCapacity);
+      const ringIndex = sourceIndex % ringCapacity;
+      const itemsOnRing = Math.min(ringCapacity, Math.max(1, anchorSources.length - ring * ringCapacity));
+      const angle = (ringIndex / itemsOnRing) * Math.PI * 2 - Math.PI / 2 + (ring % 2 ? .18 : 0);
+      const radius = categoryIds.length > 1 ? 38 + ring * 30 : 78 + ring * 38;
       const associationCount = networkConnections.filter((connection) => connection.sourceId === capture.id || connection.targetSourceId === capture.id).length;
       nodes.push({
         id: nodeId,
         type: "reel",
         label: capture.title || "Saved Reel",
         meta: categoryNames.join(" ↔ "),
-        x: categoryNode.x + Math.cos(angle) * radius,
-        y: categoryNode.y + Math.sin(angle) * radius,
+        x: anchorX + Math.cos(angle) * radius,
+        y: anchorY + Math.sin(angle) * radius,
         accent: categoryNode.accent,
         categoryId: categoryNode.id,
         categoryIds,
@@ -1169,7 +1185,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
       });
       categoryIds.forEach((categoryId, membershipIndex) => {
         const memberAccent = nodes.find((node) => node.id === categoryId)?.accent || categoryNode.accent;
-        edges.push({ id: `${categoryId}-${capture.id}`, from: categoryId, to: nodeId, kind: "source", accent: memberAccent, curve: membershipIndex ? .085 : .04 });
+        edges.push({ id: `${categoryId}-${capture.id}`, from: categoryId, to: nodeId, kind: "source", accent: memberAccent, curve: membershipIndex ? .085 : .04, strength: membershipIndex ? .11 : .42 });
       });
       if (capture.creator) creatorLinks.set(capture.creator, [...(creatorLinks.get(capture.creator) || []), nodeId]);
     });
@@ -1192,11 +1208,11 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
 
     [...creatorLinks.entries()].filter(([, reelIds]) => reelIds.length > 1).slice(0, 6).forEach(([creator, reelIds], creatorIndex) => {
       const creatorAngle = (creatorIndex / Math.max(1, Math.min(6, creatorLinks.size))) * Math.PI * 2 - Math.PI / 2;
-      const x = 500 + Math.cos(creatorAngle) * 205;
-      const y = 340 + Math.sin(creatorAngle) * 155;
+      const x = 500 + Math.cos(creatorAngle) * 390;
+      const y = 340 + Math.sin(creatorAngle) * 295;
       const id = `creator-${creator.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
       nodes.push({ id, type: "creator", label: creator, meta: `${reelIds.length} linked`, x, y, accent: "#7fa9d4", creator });
-      reelIds.forEach((reelId) => edges.push({ id: `${id}-${reelId}`, from: id, to: reelId, kind: "creator" }));
+      reelIds.forEach((reelId) => edges.push({ id: `${id}-${reelId}`, from: id, to: reelId, kind: "creator", strength: .12 }));
     });
 
     return { nodes, edges };
@@ -1205,8 +1221,8 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
   const forceData = useMemo(() => {
     const nodes = graph.nodes.map((node) => ({
       ...node,
-      x: (node.x - 500) * .36,
-      y: (node.y - 340) * .36
+      x: (node.x - 500) * .82,
+      y: (node.y - 340) * .82
     }));
     const forceNodeMap = new Map(nodes.map((node) => [node.id, node]));
     const links: VaultLink[] = graph.edges.map((edge, index) => ({
@@ -1242,14 +1258,14 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     const frame = requestAnimationFrame(() => {
       const charge = graphRef.current?.d3Force("charge");
       const link = graphRef.current?.d3Force("link");
-      charge?.strength?.((node: VaultNode) => node.type === "category" ? -54 : node.type === "creator" ? -30 : -19);
-      charge?.distanceMax?.(260);
+      charge?.strength?.((node: VaultNode) => node.type === "category" ? -220 : node.type === "creator" ? -96 : node.bridge ? -62 : -44);
+      charge?.distanceMax?.(520);
       link?.distance?.((item: VaultLink) => {
-        if (item.kind === "association") return 54;
-        if (item.kind === "creator") return 45;
-        return 36;
+        if (item.kind === "association") return 118;
+        if (item.kind === "creator") return 104;
+        return item.strength && item.strength < .2 ? 138 : 76;
       });
-      link?.strength?.((item: VaultLink) => item.kind === "association" ? .34 : item.kind === "source" ? .88 : .5);
+      link?.strength?.((item: VaultLink) => item.kind === "association" ? .055 : item.kind === "creator" ? .12 : item.strength || .42);
       graphRef.current?.d3ReheatSimulation();
     });
     return () => cancelAnimationFrame(frame);
@@ -1298,6 +1314,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
   const totalSources = knowledgeCaptures.length;
   const bridgeCount = networkMemberships.filter((membership) => membership.bridge).length;
   const connectionCount = networkConnections.length;
+  const recoveryCount = library.recovery?.length || 0;
 
   const endpointId = (endpoint: string | number | NodeObject<VaultNode> | undefined) => typeof endpoint === "object" ? String(endpoint.id) : String(endpoint ?? "");
 
@@ -1431,7 +1448,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
               </button>;
             })}
           </div>
-          <div className="map-library-footer"><span><i /> Growing with every save</span><small>Associative map</small></div>
+          <div className="map-library-footer"><span><i /> {totalSources} mapped memories</span><small>{recoveryCount ? `${recoveryCount} awaiting context` : "All caught up"}</small></div>
         </aside>
 
         <section className="vault-graph" aria-label="Knowledge categories, saved Reels, and creators">
@@ -1483,10 +1500,10 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
                 linkCurvature={(rawLink) => (rawLink as VaultLink).curve}
                 minZoom={.55}
                 maxZoom={4.5}
-                d3AlphaDecay={.028}
-                d3VelocityDecay={.24}
-                warmupTicks={prefersReducedMotion ? 160 : 64}
-                cooldownTicks={prefersReducedMotion ? 1 : 180}
+                d3AlphaDecay={.045}
+                d3VelocityDecay={.32}
+                warmupTicks={prefersReducedMotion ? 180 : 92}
+                cooldownTicks={prefersReducedMotion ? 1 : 145}
                 onEngineStop={() => {
                   if (initialFitDone.current) return;
                   initialFitDone.current = true;
@@ -1507,9 +1524,9 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
             <div className="map-type-legend">
               <strong>Map key</strong>
               <span><i className="category" /> knowledge area</span><span><i className="reel" /> saved Reel</span><span><i className="bridge" /> bridge memory</span><span><i className="connection" /> related idea</span>
-              <small>{bridgeCount} {bridgeCount === 1 ? "memory touches" : "memories touch"} more than one area</small>
+              <small>{bridgeCount} {bridgeCount === 1 ? "memory touches" : "memories touch"} more than one area. {recoveryCount ? `${recoveryCount} incomplete saves stay in Sources until verified.` : "Only verified knowledge appears here."}</small>
             </div>
-            <div className="map-canvas-hint">Drag to move · Scroll to zoom · Select a memory to reveal its threads</div>
+            <div className="map-canvas-hint">Verified knowledge only · Drag to move · Scroll to zoom · Select a memory to reveal its threads</div>
             {selectedNode ? <button className="map-reset" onClick={resetGraph}><RefreshCw size={13} /> Reset focus</button> : null}
           </div>
         </section>

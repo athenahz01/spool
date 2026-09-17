@@ -42,7 +42,8 @@ Spool, saved Reels, fragments, threads, chapters, patterns, supporting saves, cr
 
 - Default to `Playbooks`; preserve the graph behind `Map`, and keep raw evidence behind `Sources`.
 - The main hierarchy is `Second Brain → Playbook → Principles → Workflow → Reusable patterns → Supporting Reels`.
-- Initial playbooks are: Run a small AI team, Build a personal content engine, Build career proof, Create lifestyle Reels, Find and launch ideas, and Technical experiment lab.
+- Broad playbooks are: Run a small AI team, Build a personal content engine, Build career proof, Create lifestyle Reels, Find and launch ideas, and Technical experiment lab.
+- Add focused playbooks only when the library contains repeated, specific evidence. Current focused guides are: Network with substance, Build data fluency, Shape a memorable brand, and Understand AI foundations.
 - Each playbook must state an outcome before showing detail. The reader then answers: what the saves agree on, how to apply it, what tools or patterns recur, what to try next, and which Reels support it.
 - A Reel may support more than one playbook when its existing content clearly overlaps. Do not force a single-folder mental model.
 - Source facets are generated locally: domain, knowledge type, use case, evidence, and freshness.
@@ -54,7 +55,9 @@ Spool, saved Reels, fragments, threads, chapters, patterns, supporting saves, cr
 ## Current Map direction — Associative memory network
 
 - A saved Reel is one memory, not one dot per folder. It may belong to one primary knowledge area plus up to two evidence-backed secondary areas.
+- Only verified Knowledge memories appear on the map. Incomplete or blocked captures stay in Sources and the Recovery Inbox until there is enough content to classify them; do not let operational noise distort the visible brain.
 - Multi-area Reels are `bridge memories`: place them between their areas and render a segmented category-color ring so the overlap is legible before selection.
+- Category islands begin on a wide ellipse; single-area memories orbit their island in expanding rings, while bridge memories orbit the centroid of their real areas. Prefer legibility and airy separation over a compact decorative knot.
 - Knowledge areas connect only through real bridge memories. Do not draw a synthetic category ring or invent an edge just to keep every cluster attached.
 - Reel-to-Reel associations require specific evidence already stored in Spool: a shared concrete tool, several uncommon concepts, a strongly matched playbook plus supporting evidence, or creator continuity plus a shared concept.
 - Cap each Reel at four direct associations. Keep those lines thin and dashed at rest, then reveal the useful local neighborhood when a memory is selected.
