@@ -1219,11 +1219,16 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
   }, [atlasCategories, knowledgeCaptures, membershipBySource, networkConnections]);
 
   const forceData = useMemo(() => {
-    const nodes = graph.nodes.map((node) => ({
-      ...node,
-      x: (node.x - 500) * .82,
-      y: (node.y - 340) * .82
-    }));
+    const nodes = graph.nodes.map((node) => {
+      const x = (node.x - 500) * .82;
+      const y = (node.y - 340) * .82;
+      return {
+        ...node,
+        x,
+        y,
+        ...(node.type === "category" ? { fx: x, fy: y } : {})
+      };
+    });
     const forceNodeMap = new Map(nodes.map((node) => [node.id, node]));
     const links: VaultLink[] = graph.edges.map((edge, index) => ({
       id: edge.id,

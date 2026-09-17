@@ -57,7 +57,7 @@ Spool, saved Reels, fragments, threads, chapters, patterns, supporting saves, cr
 - A saved Reel is one memory, not one dot per folder. It may belong to one primary knowledge area plus up to two evidence-backed secondary areas.
 - Only verified Knowledge memories appear on the map. Incomplete or blocked captures stay in Sources and the Recovery Inbox until there is enough content to classify them; do not let operational noise distort the visible brain.
 - Multi-area Reels are `bridge memories`: place them between their areas and render a segmented category-color ring so the overlap is legible before selection.
-- Category islands begin on a wide ellipse; single-area memories orbit their island in expanding rings, while bridge memories orbit the centroid of their real areas. Prefer legibility and airy separation over a compact decorative knot.
+- Category islands stay anchored on a wide ellipse; single-area memories orbit their island in expanding rings, while bridge memories orbit the centroid of their real areas. Prefer legibility and airy separation over a compact decorative knot.
 - Knowledge areas connect only through real bridge memories. Do not draw a synthetic category ring or invent an edge just to keep every cluster attached.
 - Reel-to-Reel associations require specific evidence already stored in Spool: a shared concrete tool, several uncommon concepts, a strongly matched playbook plus supporting evidence, or creator continuity plus a shared concept.
 - Cap each Reel at four direct associations. Keep those lines thin and dashed at rest, then reveal the useful local neighborhood when a memory is selected.
