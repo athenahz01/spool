@@ -1123,8 +1123,8 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
 
     atlasCategories.forEach((category, categoryIndex) => {
       const categoryAngle = (categoryIndex / Math.max(1, atlasCategories.length)) * Math.PI * 2 - Math.PI / 2;
-      const x = 500 + Math.cos(categoryAngle) * 270;
-      const y = 340 + Math.sin(categoryAngle) * 205;
+      const x = 500 + Math.cos(categoryAngle) * 225;
+      const y = 340 + Math.sin(categoryAngle) * 170;
       const accent = categoryAccents[category.name] || categoryAccents.Other;
       categoryNodeByName.set(category.name, { id: category.id, x, y, accent });
       nodes.push({
@@ -1166,7 +1166,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
       const ringIndex = sourceIndex % ringCapacity;
       const itemsOnRing = Math.min(ringCapacity, Math.max(1, anchorSources.length - ring * ringCapacity));
       const angle = (ringIndex / itemsOnRing) * Math.PI * 2 - Math.PI / 2 + (ring % 2 ? .18 : 0);
-      const radius = categoryIds.length > 1 ? 38 + ring * 30 : 78 + ring * 38;
+      const radius = categoryIds.length > 1 ? 32 + ring * 24 : 62 + ring * 30;
       const associationCount = networkConnections.filter((connection) => connection.sourceId === capture.id || connection.targetSourceId === capture.id).length;
       nodes.push({
         id: nodeId,
@@ -1209,8 +1209,8 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
 
     [...creatorLinks.entries()].filter(([, reelIds]) => reelIds.length > 1).slice(0, 6).forEach(([creator, reelIds], creatorIndex) => {
       const creatorAngle = (creatorIndex / Math.max(1, Math.min(6, creatorLinks.size))) * Math.PI * 2 - Math.PI / 2;
-      const x = 500 + Math.cos(creatorAngle) * 390;
-      const y = 340 + Math.sin(creatorAngle) * 295;
+      const x = 500 + Math.cos(creatorAngle) * 315;
+      const y = 340 + Math.sin(creatorAngle) * 235;
       const id = `creator-${creator.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
       nodes.push({ id, type: "creator", label: creator, meta: `${reelIds.length} linked`, x, y, accent: "#7fa9d4", creator });
       reelIds.forEach((reelId, reelIndex) => edges.push({ id: `${id}-${reelId}`, from: id, to: reelId, kind: "creator", curve: (reelIndex % 2 ? -1 : 1) * .12, strength: .1 }));
@@ -1264,18 +1264,18 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     const frame = requestAnimationFrame(() => {
       const charge = graphRef.current?.d3Force("charge");
       const link = graphRef.current?.d3Force("link");
-      charge?.strength?.((node: VaultNode) => node.type === "category" ? -220 : node.type === "creator" ? -92 : node.bridge ? -58 : -40);
-      charge?.distanceMax?.(520);
+      charge?.strength?.((node: VaultNode) => node.type === "category" ? -180 : node.type === "creator" ? -78 : node.bridge ? -48 : -32);
+      charge?.distanceMax?.(430);
       link?.distance?.((item: VaultLink) => {
-        if (item.kind === "association") return 118;
-        if (item.kind === "creator") return 104;
-        return item.strength && item.strength < .2 ? 138 : 76;
+        if (item.kind === "association") return 98;
+        if (item.kind === "creator") return 88;
+        return item.strength && item.strength < .2 ? 112 : 64;
       });
       link?.strength?.((item: VaultLink) => item.kind === "association" ? .045 : item.kind === "creator" ? .1 : item.strength || .34);
 
       type SimulationNode = VaultNode & NodeObject<VaultNode>;
       let collisionNodes: SimulationNode[] = [];
-      const collisionRadius = (node: SimulationNode) => node.type === "category" ? 31 : node.type === "creator" ? 19 : node.bridge ? 15 : 13;
+      const collisionRadius = (node: SimulationNode) => node.type === "category" ? 28 : node.type === "creator" ? 17 : node.bridge ? 13.5 : 11.5;
       const collisionForce = (alpha: number) => {
         for (let pass = 0; pass < 2; pass += 1) {
           for (let index = 0; index < collisionNodes.length; index += 1) {
@@ -1285,7 +1285,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
               const dx = ((node.x || 0) + (node.vx || 0)) - ((other.x || 0) + (other.vx || 0)) || (index % 2 ? .001 : -.001);
               const dy = ((node.y || 0) + (node.vy || 0)) - ((other.y || 0) + (other.vy || 0)) || (otherIndex % 2 ? .001 : -.001);
               const distance = Math.sqrt(dx * dx + dy * dy);
-              const minimum = collisionRadius(node) + collisionRadius(other) + 3;
+              const minimum = collisionRadius(node) + collisionRadius(other) + 2;
               if (distance >= minimum) continue;
               const adjustment = ((minimum - distance) / Math.max(distance, .001)) * alpha * .34;
               const moveX = dx * adjustment;
