@@ -57,8 +57,10 @@ Spool, saved Reels, fragments, threads, chapters, patterns, supporting saves, cr
 - A saved Reel is one memory, not one dot per folder. It may belong to one primary knowledge area plus up to two evidence-backed secondary areas.
 - Only verified Knowledge memories appear on the map. Incomplete or blocked captures stay in Sources and the Recovery Inbox until there is enough content to classify them; do not let operational noise distort the visible brain.
 - Multi-area Reels are `bridge memories`: place them between their areas and render a segmented category-color ring so the overlap is legible before selection.
-- Category islands stay anchored on a compact ellipse; single-area memories orbit their island in expanding rings, while bridge memories orbit the centroid of their real areas. Keep enough collision space to prevent overlap, but preserve medium density so the map reads as one connected brain rather than separate solar systems.
-- Give every memory a collision radius so dots never stack. At rest, relationship threads should be curved and barely visible; hovering or selecting a memory reveals only its local threads at useful contrast.
+- The default map is an Obsidian-style organic field, not a radial dashboard: category hubs participate in the same force layout as memories, and the whole library settles into one irregular, connected brain cloud.
+- Reel memories are small filled points, category hubs are modest labeled anchors, and creator nodes stay peripheral. Use compact collision radii to prevent stacking without breaking the cloud into separate solar systems.
+- Keep the canvas full-bleed and quiet. Search and knowledge-area navigation live in a dismissible overlay instead of consuming a permanent sidebar.
+- At rest, show the network's thin, softly curved threads at low but readable contrast. Hovering or selecting a memory fades the wider field and reveals its local threads clearly.
 - Knowledge areas connect only through real bridge memories. Do not draw a synthetic category ring or invent an edge just to keep every cluster attached.
 - Reel-to-Reel associations require specific evidence already stored in Spool: a shared concrete tool, several uncommon concepts, a strongly matched playbook plus supporting evidence, or creator continuity plus a shared concept.
 - Cap each Reel at four direct associations. Keep those lines thin and dashed at rest, then reveal the useful local neighborhood when a memory is selected.

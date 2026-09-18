@@ -1026,6 +1026,7 @@ function ThreadsView({ library, onTranscribe }: { library: LibraryPayload; onTra
 
 function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; onTranscribe: (capture: ApiCapture) => void }) {
   const [query, setQuery] = useState("");
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [graphSize, setGraphSize] = useState({ width: 900, height: 640 });
@@ -1122,9 +1123,10 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     const categoryNodeByName = new Map<string, { id: string; x: number; y: number; accent: string }>();
 
     atlasCategories.forEach((category, categoryIndex) => {
-      const categoryAngle = (categoryIndex / Math.max(1, atlasCategories.length)) * Math.PI * 2 - Math.PI / 2;
-      const x = 500 + Math.cos(categoryAngle) * 225;
-      const y = 340 + Math.sin(categoryAngle) * 170;
+      const categoryAngle = categoryIndex * Math.PI * (3 - Math.sqrt(5)) - Math.PI / 2;
+      const categoryRadius = categoryIndex === 0 ? 48 : 76 + categoryIndex * 15;
+      const x = 500 + Math.cos(categoryAngle) * categoryRadius;
+      const y = 340 + Math.sin(categoryAngle) * categoryRadius * .72;
       const accent = categoryAccents[category.name] || categoryAccents.Other;
       categoryNodeByName.set(category.name, { id: category.id, x, y, accent });
       nodes.push({
@@ -1166,7 +1168,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
       const ringIndex = sourceIndex % ringCapacity;
       const itemsOnRing = Math.min(ringCapacity, Math.max(1, anchorSources.length - ring * ringCapacity));
       const angle = (ringIndex / itemsOnRing) * Math.PI * 2 - Math.PI / 2 + (ring % 2 ? .18 : 0);
-      const radius = categoryIds.length > 1 ? 32 + ring * 24 : 62 + ring * 30;
+      const radius = categoryIds.length > 1 ? 24 + ring * 17 : 42 + ring * 22;
       const associationCount = networkConnections.filter((connection) => connection.sourceId === capture.id || connection.targetSourceId === capture.id).length;
       nodes.push({
         id: nodeId,
@@ -1186,7 +1188,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
       categoryIds.forEach((categoryId, membershipIndex) => {
         const memberAccent = nodes.find((node) => node.id === categoryId)?.accent || categoryNode.accent;
         const curveDirection = sourceIndex % 2 ? -1 : 1;
-        edges.push({ id: `${categoryId}-${capture.id}`, from: categoryId, to: nodeId, kind: "source", accent: memberAccent, curve: curveDirection * (membershipIndex ? .2 : .1), strength: membershipIndex ? .1 : .34 });
+        edges.push({ id: `${categoryId}-${capture.id}`, from: categoryId, to: nodeId, kind: "source", accent: memberAccent, curve: curveDirection * (membershipIndex ? .065 : .035), strength: membershipIndex ? .1 : .34 });
       });
       if (capture.creator) creatorLinks.set(capture.creator, [...(creatorLinks.get(capture.creator) || []), nodeId]);
     });
@@ -1203,17 +1205,17 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
         reason: connection.reason,
         strength: connection.strength,
         accent: "#7f91a9",
-        curve: (connectionIndex % 2 ? -1 : 1) * (.16 + (connectionIndex % 3) * .035)
+        curve: (connectionIndex % 2 ? -1 : 1) * (.045 + (connectionIndex % 3) * .015)
       });
     });
 
     [...creatorLinks.entries()].filter(([, reelIds]) => reelIds.length > 1).slice(0, 6).forEach(([creator, reelIds], creatorIndex) => {
       const creatorAngle = (creatorIndex / Math.max(1, Math.min(6, creatorLinks.size))) * Math.PI * 2 - Math.PI / 2;
-      const x = 500 + Math.cos(creatorAngle) * 315;
-      const y = 340 + Math.sin(creatorAngle) * 235;
+      const x = 500 + Math.cos(creatorAngle) * 230;
+      const y = 340 + Math.sin(creatorAngle) * 170;
       const id = `creator-${creator.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
       nodes.push({ id, type: "creator", label: creator, meta: `${reelIds.length} linked`, x, y, accent: "#7fa9d4", creator });
-      reelIds.forEach((reelId, reelIndex) => edges.push({ id: `${id}-${reelId}`, from: id, to: reelId, kind: "creator", curve: (reelIndex % 2 ? -1 : 1) * .12, strength: .1 }));
+      reelIds.forEach((reelId, reelIndex) => edges.push({ id: `${id}-${reelId}`, from: id, to: reelId, kind: "creator", curve: (reelIndex % 2 ? -1 : 1) * .04, strength: .1 }));
     });
 
     return { nodes, edges };
@@ -1223,12 +1225,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     const nodes = graph.nodes.map((node) => {
       const x = (node.x - 500) * .82;
       const y = (node.y - 340) * .82;
-      return {
-        ...node,
-        x,
-        y,
-        ...(node.type === "category" ? { fx: x, fy: y } : {})
-      };
+      return { ...node, x, y };
     });
     const forceNodeMap = new Map(nodes.map((node) => [node.id, node]));
     const links: VaultLink[] = graph.edges.map((edge, index) => ({
@@ -1264,18 +1261,18 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     const frame = requestAnimationFrame(() => {
       const charge = graphRef.current?.d3Force("charge");
       const link = graphRef.current?.d3Force("link");
-      charge?.strength?.((node: VaultNode) => node.type === "category" ? -180 : node.type === "creator" ? -78 : node.bridge ? -48 : -32);
-      charge?.distanceMax?.(430);
+      charge?.strength?.((node: VaultNode) => node.type === "category" ? -105 : node.type === "creator" ? -34 : node.bridge ? -18 : -11);
+      charge?.distanceMax?.(320);
       link?.distance?.((item: VaultLink) => {
-        if (item.kind === "association") return 98;
-        if (item.kind === "creator") return 88;
-        return item.strength && item.strength < .2 ? 112 : 64;
+        if (item.kind === "association") return 48;
+        if (item.kind === "creator") return 52;
+        return item.strength && item.strength < .2 ? 64 : 38;
       });
       link?.strength?.((item: VaultLink) => item.kind === "association" ? .045 : item.kind === "creator" ? .1 : item.strength || .34);
 
       type SimulationNode = VaultNode & NodeObject<VaultNode>;
       let collisionNodes: SimulationNode[] = [];
-      const collisionRadius = (node: SimulationNode) => node.type === "category" ? 28 : node.type === "creator" ? 17 : node.bridge ? 13.5 : 11.5;
+      const collisionRadius = (node: SimulationNode) => node.type === "category" ? 15 : node.type === "creator" ? 8 : node.bridge ? 5.5 : 4.5;
       const collisionForce = (alpha: number) => {
         for (let pass = 0; pass < 2; pass += 1) {
           for (let index = 0; index < collisionNodes.length; index += 1) {
@@ -1285,7 +1282,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
               const dx = ((node.x || 0) + (node.vx || 0)) - ((other.x || 0) + (other.vx || 0)) || (index % 2 ? .001 : -.001);
               const dy = ((node.y || 0) + (node.vy || 0)) - ((other.y || 0) + (other.vy || 0)) || (otherIndex % 2 ? .001 : -.001);
               const distance = Math.sqrt(dx * dx + dy * dy);
-              const minimum = collisionRadius(node) + collisionRadius(other) + 2;
+              const minimum = collisionRadius(node) + collisionRadius(other) + 1;
               if (distance >= minimum) continue;
               const adjustment = ((minimum - distance) / Math.max(distance, .001)) * alpha * .34;
               const moveX = dx * adjustment;
@@ -1358,7 +1355,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
 
   const resetGraph = useCallback(() => {
     setSelectedNodeId(null);
-    graphRef.current?.zoomToFit(prefersReducedMotion ? 0 : 260, 150);
+    graphRef.current?.zoomToFit(prefersReducedMotion ? 0 : 260, 88);
   }, [prefersReducedMotion]);
 
   const chooseNode = useCallback((nodeId: string) => {
@@ -1392,29 +1389,29 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     const isRelated = !selectedNodeId || neighborIds.has(node.id);
     const isQueryVisible = !query.trim() || queryMatches.has(node.id);
     const scale = Math.max(.72, globalScale);
-    const radius = (node.type === "category" ? 13 : node.type === "creator" ? 7.5 : node.bridge ? 6 : 5) / scale;
-    const alpha = !isQueryVisible ? .04 : isRelated ? 1 : .09;
-    const labelVisible = node.type === "category" || node.type === "creator" || isHovered || isSelected;
+    const radius = (node.type === "category" ? 9 : node.type === "creator" ? 4.5 : node.bridge ? 3.8 : 2.8) / scale;
+    const alpha = !isQueryVisible ? .035 : isRelated ? 1 : .12;
+    const labelVisible = node.type === "category" || isHovered || isSelected;
 
     context.save();
     context.globalAlpha = alpha;
     context.shadowColor = node.accent;
-    context.shadowBlur = isSelected || isHovered ? 22 : node.type === "category" ? 13 : 7;
+    context.shadowBlur = isSelected || isHovered ? 16 : node.type === "category" ? 8 : 2;
 
-    if (node.type === "category" || isSelected || isHovered) {
+    if (isSelected || isHovered || node.type === "category") {
       context.beginPath();
-      context.arc(node.x, node.y, radius + (isSelected ? 8 : 5) / scale, 0, Math.PI * 2);
-      context.fillStyle = `${node.accent}22`;
+      context.arc(node.x, node.y, radius + (isSelected ? 5 : 3.5) / scale, 0, Math.PI * 2);
+      context.fillStyle = `${node.accent}${isSelected || isHovered ? "29" : "16"}`;
       context.fill();
     }
 
     context.beginPath();
-    context.arc(node.x, node.y, radius + (isSelected ? 2 / scale : 0), 0, Math.PI * 2);
-    context.fillStyle = node.type === "reel" ? "#fffdf7" : node.accent;
+    context.arc(node.x, node.y, radius + (isSelected ? 1.4 / scale : 0), 0, Math.PI * 2);
+    context.fillStyle = node.accent;
     context.fill();
     context.shadowBlur = 0;
-    context.lineWidth = (node.type === "reel" ? 2.2 : 1.8) / scale;
-    context.strokeStyle = node.type === "reel" ? node.accent : "rgba(255,255,255,.94)";
+    context.lineWidth = (node.type === "category" ? 1.5 : .85) / scale;
+    context.strokeStyle = "rgba(255,255,255,.94)";
     context.stroke();
 
     if (node.type === "reel" && node.bridge && node.categoryIds?.length) {
@@ -1423,8 +1420,8 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
         const start = -Math.PI / 2 + (index / bridgeAccents.length) * Math.PI * 2;
         const end = -Math.PI / 2 + ((index + 1) / bridgeAccents.length) * Math.PI * 2 - .08;
         context.beginPath();
-        context.arc(node.x!, node.y!, radius + 3.2 / scale, start, end);
-        context.lineWidth = 2.3 / scale;
+        context.arc(node.x!, node.y!, radius + 2 / scale, start, end);
+        context.lineWidth = 1.45 / scale;
         context.strokeStyle = accent;
         context.stroke();
       });
@@ -1432,23 +1429,23 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
 
     if (isSelected) {
       context.beginPath();
-      context.arc(node.x, node.y, radius + 6 / scale, 0, Math.PI * 2);
-      context.lineWidth = 1.2 / scale;
+      context.arc(node.x, node.y, radius + 4.5 / scale, 0, Math.PI * 2);
+      context.lineWidth = .9 / scale;
       context.strokeStyle = node.accent;
       context.stroke();
     }
 
     if (labelVisible) {
-      const fontSize = (node.type === "category" ? 11 : 8.5) / scale;
+      const fontSize = (node.type === "category" ? 8.8 : 7.6) / scale;
       const label = node.label.length > 30 ? `${node.label.slice(0, 28)}…` : node.label;
       context.font = `${node.type === "category" ? 680 : 560} ${fontSize}px Inter, ui-sans-serif, sans-serif`;
       context.textBaseline = "middle";
       context.fillStyle = "#293b57";
-      context.fillText(label, node.x + radius + 6 / scale, node.y - (node.type === "category" ? 3.5 / scale : 0));
+      context.fillText(label, node.x + radius + 4 / scale, node.y - (node.type === "category" ? 2.8 / scale : 0));
       if (node.type === "category") {
-        context.font = `${7.5 / scale}px Inter, ui-sans-serif, sans-serif`;
+        context.font = `${6.4 / scale}px Inter, ui-sans-serif, sans-serif`;
         context.fillStyle = "#8b929b";
-        context.fillText(node.meta, node.x + radius + 6 / scale, node.y + 7.5 / scale);
+        context.fillText(node.meta, node.x + radius + 4 / scale, node.y + 5.8 / scale);
       }
     }
     context.restore();
@@ -1459,17 +1456,19 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     if (node.x === undefined || node.y === undefined) return;
     context.fillStyle = color;
     context.beginPath();
-    context.arc(node.x, node.y, (node.type === "category" ? 20 : 13) / Math.max(.72, globalScale), 0, Math.PI * 2);
+    context.arc(node.x, node.y, (node.type === "category" ? 17 : 10) / Math.max(.72, globalScale), 0, Math.PI * 2);
     context.fill();
   }, []);
 
   return (
     <div className="vault-page knowledge-vault-page">
       <div className={`vault-graph-workspace ${selectedNode && selectedNode.type !== "category" ? "note-open" : ""} ${selectedNode?.type === "category" ? "guide-open" : ""}`}>
-        <aside className="map-library-panel">
+        <button className={`map-library-toggle ${libraryOpen ? "active" : ""}`} onClick={() => setLibraryOpen((open) => !open)} aria-expanded={libraryOpen}><Layers3 size={14} /> Areas <span>{rankedCategories.length}</span></button>
+        <aside className={`map-library-panel ${libraryOpen ? "open" : ""}`} aria-hidden={!libraryOpen}>
           <div className="map-library-brand">
             <span className="map-brand-mark"><Link2 size={16} /></span>
             <div><strong>Second Brain</strong><small>Personal knowledge network</small></div>
+            <button aria-label="Close knowledge areas" onClick={() => setLibraryOpen(false)}><X size={14} /></button>
           </div>
           <label className="vault-search"><Search size={15} /><input placeholder="Search Reels, topics, creators…" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <div className="map-library-label"><span>Knowledge areas</span><small>{rankedCategories.length} clusters</small></div>
@@ -1511,7 +1510,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
                 graphData={forceData}
                 width={graphSize.width}
                 height={graphSize.height}
-                backgroundColor="#fffdf7"
+                backgroundColor="#fbfaf4"
                 nodeCanvasObjectMode={() => "replace"}
                 nodeCanvasObject={paintNode}
                 nodePointerAreaPaint={paintNodePointer}
@@ -1524,25 +1523,24 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
                   if (query.trim() && !queryVisible) return "rgba(127,169,212,0.015)";
                   const focusNodeId = selectedNodeId || hoveredNodeId;
                   if (!focusNodeId) {
-                    if (link.kind === "association") return "rgba(72,92,119,.035)";
-                    if (link.kind === "creator") return "rgba(127,169,212,.055)";
-                    return `${link.accent}20`;
+                    if (link.kind === "association") return "rgba(72,92,119,.13)";
+                    if (link.kind === "creator") return "rgba(127,169,212,.18)";
+                    return `${link.accent}48`;
                   }
                   const related = sourceId === focusNodeId || targetId === focusNodeId;
-                  if (!related) return "rgba(127,169,212,0.018)";
-                  if (link.kind === "association") return "rgba(72,92,119,.46)";
-                  if (link.kind === "creator") return "rgba(127,169,212,.42)";
-                  return `${link.accent}8f`;
+                  if (!related) return "rgba(127,169,212,0.026)";
+                  if (link.kind === "association") return "rgba(72,92,119,.62)";
+                  if (link.kind === "creator") return "rgba(127,169,212,.58)";
+                  return `${link.accent}b5`;
                 }}
                 linkWidth={(rawLink) => {
                   const link = rawLink as VaultLink;
                   const focusNodeId = selectedNodeId || hoveredNodeId;
-                  if (!focusNodeId) return link.kind === "association" ? .25 : .5;
+                  if (!focusNodeId) return link.kind === "association" ? .32 : .46;
                   const related = endpointId(link.source) === focusNodeId || endpointId(link.target) === focusNodeId;
                   if (!related) return .2;
-                  return link.kind === "association" ? 1.15 : 1.05;
+                  return link.kind === "association" ? .95 : .9;
                 }}
-                linkLineDash={(rawLink) => (rawLink as VaultLink).kind === "association" ? [2, 5] : []}
                 linkLabel={(rawLink) => (rawLink as VaultLink).reason || ""}
                 linkCurvature={(rawLink) => (rawLink as VaultLink).curve}
                 minZoom={.55}
@@ -1554,7 +1552,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
                 onEngineStop={() => {
                   if (initialFitDone.current) return;
                   initialFitDone.current = true;
-                  graphRef.current?.zoomToFit(prefersReducedMotion ? 0 : 420, 150);
+                  graphRef.current?.zoomToFit(prefersReducedMotion ? 0 : 420, 88);
                 }}
                 onNodeClick={(node) => chooseNode(String(node.id))}
                 onNodeHover={(node) => setHoveredNodeId(node ? String(node.id) : null)}
