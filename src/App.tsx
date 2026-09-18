@@ -1185,12 +1185,13 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
       });
       categoryIds.forEach((categoryId, membershipIndex) => {
         const memberAccent = nodes.find((node) => node.id === categoryId)?.accent || categoryNode.accent;
-        edges.push({ id: `${categoryId}-${capture.id}`, from: categoryId, to: nodeId, kind: "source", accent: memberAccent, curve: membershipIndex ? .085 : .04, strength: membershipIndex ? .11 : .42 });
+        const curveDirection = sourceIndex % 2 ? -1 : 1;
+        edges.push({ id: `${categoryId}-${capture.id}`, from: categoryId, to: nodeId, kind: "source", accent: memberAccent, curve: curveDirection * (membershipIndex ? .2 : .1), strength: membershipIndex ? .1 : .34 });
       });
       if (capture.creator) creatorLinks.set(capture.creator, [...(creatorLinks.get(capture.creator) || []), nodeId]);
     });
 
-    networkConnections.forEach((connection) => {
+    networkConnections.forEach((connection, connectionIndex) => {
       const from = `reel-${connection.sourceId}`;
       const to = `reel-${connection.targetSourceId}`;
       if (!nodes.some((node) => node.id === from) || !nodes.some((node) => node.id === to)) return;
@@ -1202,7 +1203,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
         reason: connection.reason,
         strength: connection.strength,
         accent: "#7f91a9",
-        curve: .14
+        curve: (connectionIndex % 2 ? -1 : 1) * (.16 + (connectionIndex % 3) * .035)
       });
     });
 
@@ -1212,7 +1213,7 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
       const y = 340 + Math.sin(creatorAngle) * 295;
       const id = `creator-${creator.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
       nodes.push({ id, type: "creator", label: creator, meta: `${reelIds.length} linked`, x, y, accent: "#7fa9d4", creator });
-      reelIds.forEach((reelId) => edges.push({ id: `${id}-${reelId}`, from: id, to: reelId, kind: "creator", strength: .12 }));
+      reelIds.forEach((reelId, reelIndex) => edges.push({ id: `${id}-${reelId}`, from: id, to: reelId, kind: "creator", curve: (reelIndex % 2 ? -1 : 1) * .12, strength: .1 }));
     });
 
     return { nodes, edges };
@@ -1263,14 +1264,46 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
     const frame = requestAnimationFrame(() => {
       const charge = graphRef.current?.d3Force("charge");
       const link = graphRef.current?.d3Force("link");
-      charge?.strength?.((node: VaultNode) => node.type === "category" ? -220 : node.type === "creator" ? -96 : node.bridge ? -62 : -44);
+      charge?.strength?.((node: VaultNode) => node.type === "category" ? -220 : node.type === "creator" ? -92 : node.bridge ? -58 : -40);
       charge?.distanceMax?.(520);
       link?.distance?.((item: VaultLink) => {
         if (item.kind === "association") return 118;
         if (item.kind === "creator") return 104;
         return item.strength && item.strength < .2 ? 138 : 76;
       });
-      link?.strength?.((item: VaultLink) => item.kind === "association" ? .055 : item.kind === "creator" ? .12 : item.strength || .42);
+      link?.strength?.((item: VaultLink) => item.kind === "association" ? .045 : item.kind === "creator" ? .1 : item.strength || .34);
+
+      type SimulationNode = VaultNode & NodeObject<VaultNode>;
+      let collisionNodes: SimulationNode[] = [];
+      const collisionRadius = (node: SimulationNode) => node.type === "category" ? 31 : node.type === "creator" ? 19 : node.bridge ? 15 : 13;
+      const collisionForce = (alpha: number) => {
+        for (let pass = 0; pass < 2; pass += 1) {
+          for (let index = 0; index < collisionNodes.length; index += 1) {
+            const node = collisionNodes[index];
+            for (let otherIndex = index + 1; otherIndex < collisionNodes.length; otherIndex += 1) {
+              const other = collisionNodes[otherIndex];
+              const dx = ((node.x || 0) + (node.vx || 0)) - ((other.x || 0) + (other.vx || 0)) || (index % 2 ? .001 : -.001);
+              const dy = ((node.y || 0) + (node.vy || 0)) - ((other.y || 0) + (other.vy || 0)) || (otherIndex % 2 ? .001 : -.001);
+              const distance = Math.sqrt(dx * dx + dy * dy);
+              const minimum = collisionRadius(node) + collisionRadius(other) + 3;
+              if (distance >= minimum) continue;
+              const adjustment = ((minimum - distance) / Math.max(distance, .001)) * alpha * .34;
+              const moveX = dx * adjustment;
+              const moveY = dy * adjustment;
+              if (node.fx == null) {
+                node.vx = (node.vx || 0) + moveX;
+                node.vy = (node.vy || 0) + moveY;
+              }
+              if (other.fx == null) {
+                other.vx = (other.vx || 0) - moveX;
+                other.vy = (other.vy || 0) - moveY;
+              }
+            }
+          }
+        }
+      };
+      collisionForce.initialize = (nodes: SimulationNode[]) => { collisionNodes = nodes; };
+      graphRef.current?.d3Force("collision", collisionForce);
       graphRef.current?.d3ReheatSimulation();
     });
     return () => cancelAnimationFrame(frame);
@@ -1489,26 +1522,35 @@ function KnowledgeMapView({ library, onTranscribe }: { library: LibraryPayload; 
                   const targetId = endpointId(link.target);
                   const queryVisible = queryMatches.has(sourceId) && queryMatches.has(targetId);
                   if (query.trim() && !queryVisible) return "rgba(127,169,212,0.015)";
-                  const related = !selectedNodeId || sourceId === selectedNodeId || targetId === selectedNodeId;
-                  if (!related) return "rgba(127,169,212,0.035)";
-                  if (link.kind === "association") return selectedNodeId ? "rgba(72,92,119,.54)" : "rgba(72,92,119,.16)";
-                  return `${link.accent}58`;
+                  const focusNodeId = selectedNodeId || hoveredNodeId;
+                  if (!focusNodeId) {
+                    if (link.kind === "association") return "rgba(72,92,119,.035)";
+                    if (link.kind === "creator") return "rgba(127,169,212,.055)";
+                    return `${link.accent}20`;
+                  }
+                  const related = sourceId === focusNodeId || targetId === focusNodeId;
+                  if (!related) return "rgba(127,169,212,0.018)";
+                  if (link.kind === "association") return "rgba(72,92,119,.46)";
+                  if (link.kind === "creator") return "rgba(127,169,212,.42)";
+                  return `${link.accent}8f`;
                 }}
                 linkWidth={(rawLink) => {
                   const link = rawLink as VaultLink;
-                  const related = !selectedNodeId || endpointId(link.source) === selectedNodeId || endpointId(link.target) === selectedNodeId;
-                  if (!related) return .35;
-                  return link.kind === "association" ? selectedNodeId ? 1.35 : .7 : .95;
+                  const focusNodeId = selectedNodeId || hoveredNodeId;
+                  if (!focusNodeId) return link.kind === "association" ? .25 : .5;
+                  const related = endpointId(link.source) === focusNodeId || endpointId(link.target) === focusNodeId;
+                  if (!related) return .2;
+                  return link.kind === "association" ? 1.15 : 1.05;
                 }}
-                linkLineDash={(rawLink) => (rawLink as VaultLink).kind === "association" ? [2.5, 3.5] : []}
+                linkLineDash={(rawLink) => (rawLink as VaultLink).kind === "association" ? [2, 5] : []}
                 linkLabel={(rawLink) => (rawLink as VaultLink).reason || ""}
                 linkCurvature={(rawLink) => (rawLink as VaultLink).curve}
                 minZoom={.55}
                 maxZoom={4.5}
-                d3AlphaDecay={.045}
-                d3VelocityDecay={.32}
-                warmupTicks={prefersReducedMotion ? 180 : 92}
-                cooldownTicks={prefersReducedMotion ? 1 : 145}
+                d3AlphaDecay={.022}
+                d3VelocityDecay={.24}
+                warmupTicks={prefersReducedMotion ? 220 : 118}
+                cooldownTicks={prefersReducedMotion ? 1 : 220}
                 onEngineStop={() => {
                   if (initialFitDone.current) return;
                   initialFitDone.current = true;
