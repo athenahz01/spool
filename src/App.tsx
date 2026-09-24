@@ -203,7 +203,7 @@ type LibraryPayload = {
   memberships?: ApiKnowledgeMembership[];
   connections?: ApiKnowledgeConnection[];
 };
-type ApiHealth = { ok: boolean; provider: string; configured: boolean; providerStatus: "missing" | "configured" | "connected" | "invalid"; model: string; protected: boolean; transcriptionConfigured?: boolean; transcriptionProvider?: string };
+type ApiHealth = { ok: boolean; provider: string; configured: boolean; providerStatus: "missing" | "configured" | "connected" | "invalid"; model: string; protected: boolean; transcriptionConfigured?: boolean; transcriptionProvider?: string; transcriptionAccount?: { status: "missing" | "invalid" | "unknown" | "available" | "exhausted"; remainingCredits?: number; usedCredits?: number; maxCredits?: number } };
 type ApiAskResponse = {
   answer: string;
   model: string;
@@ -274,7 +274,7 @@ function captureStatusCopy(capture: ApiCapture) {
   if (transcriptWorking) return "Reading the spoken words. Spool will continue automatically, even if you leave this page.";
   if (capture.transcriptStatus === "failed") {
     if (/no spoken words/i.test(capture.transcriptError || "")) return "No speech was detected. This Reel stays saved, but it cannot create a script.";
-    if (/limit exceeded|quota|insufficient credits/i.test(capture.transcriptError || "")) return "Your Supadata transcript allowance is used up. Retry after the credits reset or you add more.";
+    if (/limit[ -]exceeded|quota|insufficient credits/i.test(capture.transcriptError || "")) return "This Reel is saved. Supadata reached a usage or request limit. Check your allowance before retrying, or add the useful text as context.";
     return "The transcript did not finish. Retry the transcript to continue.";
   }
   if (capture.status === "failed" && /401|authentication_error|api key is invalid/i.test(capture.error || "")) return "Anthropic rejected the API key. Replace it in Vercel, then retry analysis.";
@@ -531,6 +531,7 @@ function BriefingSourceIndex({
   onTranscribe: (capture: ApiCapture) => void;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(10);
 
   if (!captures.length) {
     return <div className="briefing-source-empty"><Inbox size={17} /><span>Your first saved Reel will appear here.</span></div>;
@@ -538,7 +539,7 @@ function BriefingSourceIndex({
 
   return (
     <div className="briefing-source-index">
-      {captures.slice(0, 5).map((capture) => {
+      {captures.slice(0, visibleCount).map((capture) => {
         const expanded = expandedId === capture.id;
         const working = capture.status === "queued" || capture.status === "processing";
         const transcribing = capture.transcriptStatus === "queued" || capture.transcriptStatus === "processing";
@@ -556,7 +557,7 @@ function BriefingSourceIndex({
             <p>{captureStatusCopy(capture)}</p>
             {capture.sharedText ? <span className="briefing-source-reason"><Bookmark size={11} /> {capture.sharedText}</span> : null}
             <div>
-              {capture.status === "needs-context" ? <button onClick={() => onAddContext(capture)}>Add context</button> : null}
+              {capture.status === "needs-context" || capture.status === "failed" ? <button onClick={() => onAddContext(capture)}>Add context</button> : null}
               {capture.status === "needs-context" || capture.status === "failed" || capture.error ? <button onClick={() => onRetry(capture)}><RefreshCw size={12} /> {capture.transcript ? "Retry analysis" : "Retry"}</button> : null}
               <button disabled={transcribing} onClick={() => onTranscribe(capture)}>{transcribing ? <RefreshCw size={12} className="spin" /> : capture.transcript ? <FileText size={12} /> : <AudioLines size={12} />}{transcribing ? "Transcribing" : capture.transcript ? "Script ready" : "Transcribe"}</button>
               <a href={capture.url} target="_blank" rel="noreferrer">Original <ExternalLink size={12} /></a>
@@ -564,6 +565,7 @@ function BriefingSourceIndex({
           </div> : null}
         </article>;
       })}
+      {captures.length > visibleCount ? <button className="text-action" onClick={() => setVisibleCount((count) => count + 20)}>Show more saves ({captures.length - visibleCount} remaining)</button> : null}
     </div>
   );
 }
@@ -1893,8 +1895,8 @@ function SetupView({ onCapture, health }: { onCapture: () => void; health: ApiHe
         <div className={`connection-card transcript-connection ${health?.transcriptionConfigured ? "connected" : "demo"}`}>
           <span><AudioLines size={17} /></span>
           <div>
-            <strong>{health?.transcriptionConfigured ? "Selective transcripts connected · Supadata" : "Selective transcripts are optional"}</strong>
-            <p>{health?.transcriptionConfigured ? "Spool spends a credit only when you request a script." : "Connect Supadata to add spoken-word scripts only to the Reels worth studying."}</p>
+            <strong>{health?.transcriptionAccount?.status === "exhausted" ? "Transcript credits used up" : health?.transcriptionAccount?.status === "invalid" ? "Supadata key needs attention" : health?.transcriptionConfigured ? "Selective transcripts · Supadata" : "Selective transcripts are optional"}</strong>
+            <p>{health?.transcriptionConfigured ? "Transcripts use credits for Script saves and Knowledge saves whose captions lack the lesson. Browsing existing notes is free." : "Connect Supadata to add spoken-word scripts only to the Reels worth studying."}</p>
           </div>
         </div>
 
@@ -2204,10 +2206,33 @@ export default function App() {
   const [library, setLibrary] = useState<LibraryPayload>(emptyLibrary);
   const [health, setHealth] = useState<ApiHealth | null>(null);
   const [contextCapture, setContextCapture] = useState<ApiCapture | null>(null);
+  const [libraryLoaded, setLibraryLoaded] = useState(false);
+  const [libraryError, setLibraryError] = useState("");
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [checkingHealth, setCheckingHealth] = useState(false);
 
   const refreshLibrary = async () => {
-    const response = await fetch("/api/library");
-    if (response.ok) setLibrary(await response.json() as LibraryPayload);
+    try {
+      const response = await fetch("/api/library", { signal: AbortSignal.timeout(20_000) });
+      if (!response.ok) throw new Error("Library unavailable");
+      const payload = await response.json() as LibraryPayload;
+      if (!Array.isArray(payload.captures)) throw new Error("Invalid library response");
+      setLibrary(payload);
+      setLibraryLoaded(true);
+      setLibraryError("");
+    } catch {
+      setLibraryError("Couldn't refresh your library. Your saved items haven't been deleted. Check your connection and try again.");
+    }
+  };
+
+  const refreshHealth = async () => {
+    setCheckingHealth(true);
+    try {
+      const response = await fetch("/api/health", { signal: AbortSignal.timeout(15_000) });
+      if (!response.ok) throw new Error("Status unavailable");
+      setHealth(await response.json() as ApiHealth);
+    } catch { setToast("Couldn't check the connection. Try again without changing your saved items."); }
+    finally { setCheckingHealth(false); }
   };
 
   useEffect(() => {
@@ -2222,10 +2247,7 @@ export default function App() {
         }
       }
     })();
-    fetch("/api/health")
-      .then((response) => response.ok ? response.json() : null)
-      .then((result: ApiHealth | null) => setHealth(result))
-      .catch(() => undefined);
+    void refreshHealth();
   }, []);
 
   const hasPending = library.captures.some((capture) => capture.status === "queued" || capture.status === "processing" || capture.transcriptStatus === "queued" || capture.transcriptStatus === "processing");
@@ -2261,22 +2283,44 @@ export default function App() {
 
   const openThread = () => setActive("threads");
 
+  const blockedSaves = library.captures.filter((capture) => capture.status === "needs-context" || capture.status === "failed" || capture.transcriptStatus === "failed");
+  const limitCount = library.captures.filter((capture) => /limit[ -]exceeded|quota|insufficient credits/i.test(capture.transcriptError || "")).length;
+  const transcriptAccount = health?.transcriptionAccount;
+  const transcriptBlocked = transcriptAccount?.status === "exhausted" || transcriptAccount?.status === "invalid";
+
+  const postCaptureAction = async (path: string, options: RequestInit = {}) => {
+    try {
+      const response = await fetch(path, { method: "POST", ...options, signal: AbortSignal.timeout(20_000) });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(result.error || "Couldn't start processing. Please try again.");
+      }
+      return true;
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Connection lost. Please try again.");
+      return false;
+    }
+  };
+
   const retryCapture = async (capture: ApiCapture) => {
-    const response = await fetch(`/api/captures/${capture.id}/retry`, { method: "POST" });
-    if (response.ok) {
-      setToast("Re-reading that source with Claude.");
+    if (!capture.transcript && capture.transcriptStatus === "failed" && transcriptBlocked) {
+      setToast("Transcription is blocked. Check Supadata, then recheck the connection. You can still add context.");
+      return;
+    }
+    if (await postCaptureAction(`/api/captures/${capture.id}/retry`)) {
+      setToast(capture.transcript ? "Retrying analysis using the saved transcript." : "Retry requested for this save.");
       await refreshLibrary();
     }
   };
 
   const addContext = async (sharedText: string) => {
     if (!contextCapture) return;
-    const response = await fetch(`/api/captures/${contextCapture.id}`, {
+    const succeeded = await postCaptureAction(`/api/captures/${contextCapture.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sharedText, reprocess: true })
     });
-    if (response.ok) {
+    if (succeeded) {
       setContextCapture(null);
       setToast("Context added. Claude is rebuilding the note.");
       await refreshLibrary();
@@ -2284,14 +2328,16 @@ export default function App() {
   };
 
   const transcribeCapture = async (capture: ApiCapture) => {
-    const response = await fetch(`/api/captures/${capture.id}/transcribe`, { method: "POST" });
-    if (response.ok) {
-      setToast("Transcript requested. This Reel is gaining an audio thread.");
+    if (capture.transcript) { setActive("scripts"); return; }
+    if (transcriptBlocked) {
+      setToast("Transcription is blocked. Check Supadata, then recheck the connection. Your Reel is saved.");
+      return;
+    }
+    if (await postCaptureAction(`/api/captures/${capture.id}/transcribe`)) {
+      setToast("Transcript requested. Supadata credits may be used.");
       await refreshLibrary();
       return;
     }
-    const failure = await response.json().catch(() => ({ error: "Transcript service unavailable" })) as { error?: string };
-    setToast(failure.error || "Transcript service unavailable");
   };
 
   return (
@@ -2300,11 +2346,22 @@ export default function App() {
       <main className="main-shell">
         <Header active={active} onCapture={() => setCaptureOpen(true)} onAsk={() => setAskOpen(true)} />
         <div className="mobile-brand"><SpoolMark /><span>spool</span><div><button aria-label="Ask Spool" onClick={() => setAskOpen(true)}><Sparkles size={17} /></button><button aria-label="Open iPhone capture setup" onClick={() => setActive("setup")}><Menu size={19} /></button></div></div>
+        {libraryError ? <div className="service-notice" role="alert"><p>{libraryError}</p><button onClick={() => void refreshLibrary()}>Try loading again</button></div> : !libraryLoaded ? <div className="service-notice" role="status">Loading your saved library…</div> : null}
+        {libraryLoaded && blockedSaves.length && (active === "briefing" || active === "setup") ? <section className="service-notice" aria-label="Processing status">
+          <div><strong>{transcriptAccount?.status === "exhausted" ? "Transcript credits used up" : transcriptAccount?.status === "invalid" ? "Supadata connection needs attention" : `${blockedSaves.length} saves need attention`}</strong>
+            <p>{transcriptAccount?.status === "exhausted" ? `${transcriptAccount.usedCredits} of ${transcriptAccount.maxCredits} Supadata credits used. New transcripts must wait for a reset or more credits.` : transcriptAccount?.status === "invalid" ? "Supadata rejected the configured key. Update it in Vercel to restore transcription." : limitCount ? `${limitCount} saves hit a Supadata limit. Check the allowance before retrying.` : "Some sources need more context or an analysis retry."} Your links and existing notes are safe.</p>
+            <div className="service-actions"><button onClick={() => setRecoveryOpen((open) => !open)} aria-expanded={recoveryOpen}>{recoveryOpen ? "Hide affected saves" : `Review affected saves (${blockedSaves.length})`}</button><button disabled={checkingHealth} onClick={() => void refreshHealth()}>{checkingHealth ? "Checking…" : "Recheck connection"}</button><a href="https://dash.supadata.ai" target="_blank" rel="noreferrer">Check Supadata <ExternalLink size={12} /></a></div>
+            <small>No bulk retries. Choose a save to retry, or add context without requesting a transcript.</small>
+          </div>
+          {recoveryOpen ? <BriefingSourceIndex captures={blockedSaves} onRetry={retryCapture} onAddContext={setContextCapture} onTranscribe={transcribeCapture} /> : null}
+        </section> : null}
+        {libraryLoaded ? <>
         {active === "briefing" ? <Briefing onNavigate={setActive} onOpenThread={openThread} library={library} onRetry={retryCapture} onAddContext={setContextCapture} onTranscribe={transcribeCapture} /> : null}
         {active === "threads" ? <ThreadsView library={library} onTranscribe={transcribeCapture} /> : null}
         {active === "scripts" ? <ScriptBankView library={library} /> : null}
         {active === "creators" ? <CreatorsView library={library} /> : null}
         {active === "setup" ? <SetupView onCapture={() => setCaptureOpen(true)} health={health} /> : null}
+        </> : null}
       </main>
       <MobileNav active={active} onNavigate={setActive} />
       {askOpen ? <AskSpool library={library} onClose={() => setAskOpen(false)} /> : null}

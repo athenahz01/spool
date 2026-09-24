@@ -4,6 +4,9 @@ import { existsSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findCapture, readCaptures, storageMode, upsertCapture } from "./lib/storage.mjs";
+import { safeText, transcriptFailure, canAutoRetryAnalysis, createTranscriptAccountReader, supadataErrorMessage } from "./lib/processing.mjs";
+
+const readTranscriptAccount = createTranscriptAccountReader();
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const distDir = join(root, "dist");
@@ -459,8 +462,8 @@ function uniqueText(items, limit = Infinity) {
 }
 
 function clipText(value, limit) {
-  const text = String(value || "").trim();
-  return text.length > limit ? `${text.slice(0, limit - 1).trim()}…` : text;
+  const text = safeText(value).trim();
+  return text.length > limit ? `${safeText(text, limit - 1).trim()}…` : text;
 }
 
 export function buildAskSourceContext(captures, sourceIds) {
@@ -517,7 +520,7 @@ async function askWithAnthropic(question, sourceContext) {
       "If the saved notes are insufficient, state exactly what is missing.",
       "Stay under 350 words. Use plain language and short sections."
     ].join(" "),
-    messages: [{ role: "user", content: `Question: ${question}\n\nSaved source notes:\n${sourceContext}` }]
+    messages: [{ role: "user", content: safeText(`Question: ${question}\n\nSaved source notes:\n${sourceContext}`) }]
   });
   const answer = response.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
   if (!answer) throw new Error("Claude returned an empty answer.");
@@ -551,8 +554,7 @@ async function fetchSupadata(path, timeoutMs = 48_000) {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const detail = payload?.message || payload?.error || `Supadata returned ${response.status}`;
-      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      throw new Error(supadataErrorMessage(payload, response.status, process.env.SUPADATA_API_KEY));
     }
     return {
       payload,
@@ -566,6 +568,11 @@ async function fetchSupadata(path, timeoutMs = 48_000) {
 
 async function requestTranscript(sourceUrl, existingJobId = "", onJobStarted = async () => undefined) {
   if (!process.env.SUPADATA_API_KEY) throw new Error("Supadata is not connected yet.");
+  if (!existingJobId) {
+    const account = await readTranscriptAccount(process.env.SUPADATA_API_KEY);
+    if (account.status === "exhausted") throw new Error("Supadata quota exceeded: transcript allowance is used up. Wait for your credits to reset or check your Supadata account.");
+    if (account.status === "invalid") throw new Error("Supadata rejected the API key. Update the server connection before retrying.");
+  }
   let result;
   let credits;
   let jobId = existingJobId;
@@ -576,14 +583,18 @@ async function requestTranscript(sourceUrl, existingJobId = "", onJobStarted = a
     result = await fetchSupadata(`/v1/transcript?${query.toString()}`);
     credits = result.credits;
     jobId = result.payload?.jobId || "";
-    if (jobId) await onJobStarted(jobId, credits);
+    if (jobId) {
+      await onJobStarted(jobId, credits);
+      // A slow initial request must not leave too little function time to poll.
+      return { pending: true, jobId, credits };
+    }
   }
   if (result.status === 202 || jobId) {
     if (!jobId) throw new Error("Supadata started a transcript without returning a job ID.");
-    const deadline = Date.now() + 44_000;
+    const deadline = Date.now() + 32_000;
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 1_000));
-      result = await fetchSupadata(`/v1/transcript/${encodeURIComponent(jobId)}`, 12_000);
+      result = await fetchSupadata(`/v1/transcript/${encodeURIComponent(jobId)}`, Math.max(1, Math.min(12_000, deadline - Date.now())));
       const status = result.payload?.status;
       if (status === "failed") throw new Error(result.payload?.error || "Supadata could not transcribe this Reel.");
       if (status === "completed") break;
@@ -723,7 +734,7 @@ async function analyzeWithAnthropic(capture) {
     ].join(" ");
   const messages = [{
       role: "user",
-      content: `Analyze this saved source.\nURL: ${capture.url}\nCreator hint: ${instagramContext?.creator || capture.creator || "Unknown"}\nShared text: ${suppliedContext}`
+      content: safeText(`Analyze this saved source.\nURL: ${capture.url}\nCreator hint: ${instagramContext?.creator || capture.creator || "Unknown"}\nShared text: ${suppliedContext}`)
     }];
   const webFetchTool = {
       type: "web_fetch_20260318",
@@ -812,7 +823,7 @@ async function transcribeCapture(id) {
       capture.transcriptError = capture.transcriptStatus === "failed"
         ? "The transcript took too long to finish. Retry the transcript to start a fresh attempt."
         : "Supadata is still preparing this transcript. Spool will check again automatically.";
-      if (capture.transcriptStatus === "failed") {
+      if (capture.transcriptStatus === "failed" && capture.status !== "ready") {
         capture.status = "needs-context";
         capture.topic = "Transcript needs retry";
         capture.summary = "The Reel is saved, but its transcript did not finish. Retry the transcript to continue.";
@@ -835,15 +846,11 @@ async function transcribeCapture(id) {
     if (!capture) return null;
     capture.transcriptStatus = "failed";
     capture.transcriptError = error instanceof Error ? error.message : "Transcription failed";
-    capture.status = "needs-context";
-    const noSpeech = /no spoken words/i.test(capture.transcriptError);
-    const limitReached = /limit exceeded|quota|insufficient credits/i.test(capture.transcriptError);
-    capture.topic = noSpeech ? "No speech detected" : limitReached ? "Transcript limit reached" : "Transcript unavailable";
-    capture.summary = noSpeech
-      ? "This Reel has no detectable spoken words, so there is no script to add to the bank. The Reel remains saved."
-      : limitReached
-        ? "Your Supadata transcript allowance is used up. This Reel stays saved; retry after your credits reset or you add more."
-        : "The Reel is saved, but its spoken words could not be transcribed. Retry the transcript to continue.";
+    // A failed optional transcript must not erase an already usable note.
+    if (capture.status !== "ready") {
+      capture.status = "needs-context";
+      Object.assign(capture, transcriptFailure(capture.transcriptError));
+    }
     capture.transcriptUpdatedAt = new Date().toISOString();
     await upsertCapture(capture);
     return capture;
@@ -971,7 +978,7 @@ async function prepareStaleRepairs() {
     const staleAnalysis = isStaleCapture(capture);
     const staleTranscript = isStaleTranscript(capture);
     const recoveryCount = Number(capture.recoveryCount || 0);
-    const recoverableAnalysis = capture.status === "failed" && capture.provider === "anthropic" && recoveryCount < 2;
+    const recoverableAnalysis = canAutoRetryAnalysis(capture);
     const recoverableTranscript = capture.transcriptStatus === "failed" && recoveryCount < 2 && /aborted|too long|timed out|timeout/i.test(capture.transcriptError || "");
     if (!staleAnalysis && !staleTranscript && !recoverableAnalysis && !recoverableTranscript) continue;
     if (staleTranscript || recoverableTranscript) {
@@ -1202,7 +1209,8 @@ export async function handleApi(req, res, pathname, schedule = (work) => void wo
       protected: Boolean(process.env.SPOOL_CAPTURE_TOKEN),
       storage: storageMode(),
       transcriptionProvider: "supadata",
-      transcriptionConfigured: Boolean(process.env.SUPADATA_API_KEY)
+      transcriptionConfigured: Boolean(process.env.SUPADATA_API_KEY),
+      transcriptionAccount: await readTranscriptAccount(process.env.SUPADATA_API_KEY)
     });
   }
   if (pathname === "/api/captures" && req.method === "GET") {
@@ -1290,7 +1298,11 @@ export async function handleApi(req, res, pathname, schedule = (work) => void wo
       }
       await upsertCapture(capture);
       json(res, 200, capture);
-      if (body.reprocess === true) schedule(processCapture(capture.id, previousReadyCapture, origin));
+      // Explicit context is a recovery path, including when Script is blocked.
+      // Analyze the supplied text without starting another transcript request.
+      if (body.reprocess === true) schedule(typeof body.sharedText === "string" && body.sharedText.trim()
+        ? enrichCapture(capture.id, previousReadyCapture)
+        : processCapture(capture.id, previousReadyCapture, origin));
       return;
     } catch (error) {
       return json(res, 400, { error: error instanceof Error ? error.message : "Could not update capture" });
@@ -1303,6 +1315,8 @@ export async function handleApi(req, res, pathname, schedule = (work) => void wo
     if (!capture) return json(res, 404, { error: "Capture not found" });
     const previousReadyCapture = capture.status === "ready" ? { ...capture } : null;
     if (!capture.transcript && capture.transcriptStatus === "failed") {
+      const account = await readTranscriptAccount(process.env.SUPADATA_API_KEY);
+      if (account.status === "exhausted" || account.status === "invalid") return json(res, 409, { error: "Transcription is blocked. Check Supadata and recheck the connection, or add context. Your save is unchanged." });
       capture.transcriptStatus = "queued";
       capture.transcriptJobId = "";
       capture.transcriptAttemptCount = 0;
@@ -1336,6 +1350,8 @@ export async function handleApi(req, res, pathname, schedule = (work) => void wo
     if (!capture) return json(res, 404, { error: "Capture not found" });
     if ((capture.transcriptStatus === "processing" || capture.transcriptStatus === "queued") && !isStaleTranscript(capture)) return json(res, 202, capture);
     if (capture.transcript) return json(res, 200, capture);
+    const account = await readTranscriptAccount(process.env.SUPADATA_API_KEY);
+    if (account.status === "exhausted" || account.status === "invalid") return json(res, 409, { error: "Transcription is blocked. Check Supadata and recheck the connection, or add context. Your save is unchanged." });
     const previousReadyCapture = capture.status === "ready" ? { ...capture } : null;
     const restartTranscript = capture.transcriptStatus === "failed";
     capture.intents = [...new Set([...intentsForCapture(capture), "script"])];

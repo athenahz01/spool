@@ -643,6 +643,15 @@ h1, h2, h3, .brand-name, .mobile-brand > span, .capture-row-copy strong, .empty-
   .ask-sheet { animation: none; }
 }
 
+.service-notice { margin: 18px clamp(16px, 3vw, 48px); padding: 18px 22px; border: 1px solid #ddd7be; border-radius: 12px; background: #fffdf3; color: #293c58; font-size: 14px; }
+.service-notice p { margin: 7px 0 12px; max-width: 850px; line-height: 1.55; }
+.service-notice small { display: block; margin-top: 10px; color: #586777; line-height: 1.5; }
+.service-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.service-notice > button, .service-actions button, .service-actions a { display: inline-flex; align-items: center; gap: 6px; padding: 9px 12px; min-height: 40px; border: 1px solid #c4d5e4; border-radius: 7px; color: #294b70; background: #edf4fa; font: inherit; text-decoration: none; cursor: pointer; }
+.service-actions button:disabled { opacity: .65; cursor: wait; }
+.service-notice .briefing-source-index { margin-top: 16px; max-height: 60vh; overflow-y: auto; }
+.service-notice :focus-visible { outline: 2px solid #376e9e; outline-offset: 3px; }
+
 @media (max-width: 560px) {
   .vault-graph-head span:nth-child(2), .vault-graph-head small, .vault-legend small { display: none; }
   .vault-graph-workspace { min-height: 470px; }

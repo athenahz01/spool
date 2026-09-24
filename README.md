@@ -28,6 +28,9 @@ Spool turns explicitly shared Instagram Reels, creator profiles, YouTube videos,
 - Hook and Script banks with category search, opening-pattern filters, reusable script shapes, and zero-cost browsing/copying
 - Zero-cost Second Brain browsing and regrouping: opening playbooks, changing filters, and exploring the map never calls Claude or Supadata
 - A regression test that verifies library and playbook generation performs no external fetches
+- Supadata account checks (cached for one minute) that distinguish exhausted credits from a configured key; exhausted/invalid accounts cannot start new transcripts
+- A visible processing-status panel with all affected saves, pagination, context recovery without transcription, and explicit library-loading errors
+- Unicode-safe provider input and automatic-retry protection for permanent provider errors; optional transcript failures preserve ready notes
 - Ask Spool with free on-device retrieval, evidence links, optional one-request Claude synthesis, and a 12-answer device cache
 - A complete in-app Shortcut setup recipe at `/shortcut-setup.html`
 - Demo mode that works without credentials
