@@ -3,10 +3,30 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { findCapture, readCaptures, storageMode, upsertCapture } from "./lib/storage.mjs";
+import { findCapture, readCaptures, storageMode, upsertCapture, transcriptJobs } from "./lib/storage.mjs";
 import { safeText, transcriptFailure, canAutoRetryAnalysis, createTranscriptAccountReader, supadataErrorMessage } from "./lib/processing.mjs";
+import { createApifyClient, instagramReelUrl, apifyUnavailableMessage } from "./lib/apify.mjs";
 
 const readTranscriptAccount = createTranscriptAccountReader();
+const apify = createApifyClient();
+
+async function transcriptAccess(capture) {
+  // An existing job can be polled even after the allowance is spent.
+  if (capture.transcriptProvider === "apify" && capture.transcriptJobId) return { available: true };
+  if (capture.transcriptJobId && capture.transcriptProvider !== "apify") return { available: true };
+  const primary = await readTranscriptAccount(process.env.SUPADATA_API_KEY);
+  if (["available", "unknown"].includes(primary.status)) return { available: true };
+  if (instagramReelUrl(capture.url) && process.env.APIFY_API_TOKEN) {
+    const backup = await apify.account(process.env.APIFY_API_TOKEN);
+    return { available: backup.status === "available", error: apifyUnavailableMessage(backup) };
+  }
+  return { available: false, error: "Transcription is paused. Check your provider allowance, or add context. Your save is unchanged." };
+}
+
+async function resetFailedApifyJob(capture) {
+  const canonical = instagramReelUrl(capture.url);
+  if (process.env.APIFY_API_TOKEN && canonical) await transcriptJobs.resetFailed(`apify:${canonical.split("/")[4]}`);
+}
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const distDir = join(root, "dist");
@@ -554,7 +574,9 @@ async function fetchSupadata(path, timeoutMs = 48_000) {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(supadataErrorMessage(payload, response.status, process.env.SUPADATA_API_KEY));
+      const error = new Error(supadataErrorMessage(payload, response.status, process.env.SUPADATA_API_KEY));
+      error.status = response.status;
+      throw error;
     }
     return {
       payload,
@@ -596,7 +618,11 @@ async function requestTranscript(sourceUrl, existingJobId = "", onJobStarted = a
       await new Promise((resolve) => setTimeout(resolve, 1_000));
       result = await fetchSupadata(`/v1/transcript/${encodeURIComponent(jobId)}`, Math.max(1, Math.min(12_000, deadline - Date.now())));
       const status = result.payload?.status;
-      if (status === "failed") throw new Error(result.payload?.error || "Supadata could not transcribe this Reel.");
+      if (status === "failed") {
+        const error = new Error(supadataErrorMessage({ error: result.payload?.error || "Supadata could not transcribe this Reel." }, 422, process.env.SUPADATA_API_KEY));
+        error.transcriptJobFailed = true;
+        throw error;
+      }
       if (status === "completed") break;
     }
     if (result.payload?.status !== "completed") return { pending: true, jobId, credits };
@@ -794,7 +820,7 @@ async function analyzeWithAnthropic(capture) {
     model,
     requestId: response._request_id,
     usage: response.usage,
-    extraction: capture.transcript ? "supadata-transcript" : instagramContext?.caption ? "instagram-embed-caption" : capture.sharedText ? "shared-text" : "source-fetch"
+    extraction: capture.transcript ? `${capture.transcriptProvider || "supadata"}-transcript` : instagramContext?.caption ? "instagram-embed-caption" : capture.sharedText ? "shared-text" : "source-fetch"
   };
 }
 
@@ -807,22 +833,43 @@ async function transcribeCapture(id) {
   capture.transcriptAttemptCount = Number(capture.transcriptAttemptCount || 0) + 1;
   await upsertCapture(capture);
   try {
-    const result = await requestTranscript(capture.url, capture.transcriptJobId || "", async (jobId, credits) => {
+    const checkpoint = async (jobId, credits, provider) => {
       const current = await findCapture(id);
       if (!current) return;
       current.transcriptJobId = jobId;
+      current.transcriptProvider = provider;
       if (credits) current.transcriptCredits = credits;
       current.transcriptJobStartedAt = new Date().toISOString();
       await upsertCapture(current);
-    });
+    };
+    const account = await readTranscriptAccount(process.env.SUPADATA_API_KEY);
+    const canUseBackup = Boolean(process.env.APIFY_API_TOKEN && instagramReelUrl(capture.url));
+    const useBackup = capture.transcriptProvider === "apify" || (!capture.transcriptJobId && canUseBackup && ["missing", "exhausted", "invalid"].includes(account.status));
+    let result;
+    if (useBackup) {
+      result = await apify.transcript({ url: capture.url, key: process.env.APIFY_API_TOKEN, jobs: transcriptJobs,
+        onJobStarted: (jobId) => checkpoint(jobId, undefined, "apify") });
+    } else {
+      try {
+        result = { ...await requestTranscript(capture.url, capture.transcriptJobId || "", (jobId, credits) => checkpoint(jobId, credits, "supadata")), provider: "supadata" };
+      } catch (error) {
+        // Definite rejection: move to the backup in a fresh function invocation.
+        // Pending jobs, ambiguous timeouts, and silent videos are not retried elsewhere.
+        if (canUseBackup && !/no spoken words|no speech|no audio/i.test(error.message) && ((!capture.transcriptJobId && [401, 403, 429, 500, 502, 503, 504].includes(error.status)) || error.transcriptJobFailed)) {
+          await checkpoint("", undefined, "apify");
+          result = { pending: true, jobId: "", provider: "apify" };
+        } else throw error;
+      }
+    }
     capture = await findCapture(id);
     if (!capture) return null;
     if (result.pending) {
       capture.transcriptJobId = result.jobId;
-      capture.transcriptStatus = Number(capture.transcriptAttemptCount || 0) >= 4 ? "failed" : "queued";
+      capture.transcriptProvider = result.provider;
+      capture.transcriptStatus = Number(capture.transcriptAttemptCount || 0) >= (result.provider === "apify" ? 12 : 4) ? "failed" : "queued";
       capture.transcriptError = capture.transcriptStatus === "failed"
-        ? "The transcript took too long to finish. Retry the transcript to start a fresh attempt."
-        : "Supadata is still preparing this transcript. Spool will check again automatically.";
+        ? "The transcript is still pending. Retry to check the existing job; Spool will not start a duplicate."
+        : "The transcript is being prepared. Spool will check again automatically.";
       if (capture.transcriptStatus === "failed" && capture.status !== "ready") {
         capture.status = "needs-context";
         capture.topic = "Transcript needs retry";
@@ -833,6 +880,7 @@ async function transcribeCapture(id) {
       return capture;
     }
     capture.transcript = result.transcript;
+    capture.transcriptProvider = result.provider;
     capture.transcriptLanguage = result.language;
     capture.transcriptCredits = result.credits;
     capture.transcriptStatus = "ready";
@@ -896,7 +944,7 @@ async function processCapture(id, previousReadyCapture = null, origin = "") {
   capture = await findCapture(id);
   if (!capture || capture.status === "failed" || capture.status === "ready" || !wantsKnowledge || capture.transcript || capture.sourceCoverage === "complete") return;
 
-  if (!capture.transcriptRecommended || !process.env.SUPADATA_API_KEY) return;
+  if (!capture.transcriptRecommended || !(process.env.SUPADATA_API_KEY || process.env.APIFY_API_TOKEN)) return;
   capture.transcriptStatus = "queued";
   capture.transcriptError = "";
   capture.status = "processing";
@@ -1209,8 +1257,9 @@ export async function handleApi(req, res, pathname, schedule = (work) => void wo
       protected: Boolean(process.env.SPOOL_CAPTURE_TOKEN),
       storage: storageMode(),
       transcriptionProvider: "supadata",
-      transcriptionConfigured: Boolean(process.env.SUPADATA_API_KEY),
-      transcriptionAccount: await readTranscriptAccount(process.env.SUPADATA_API_KEY)
+      transcriptionConfigured: Boolean(process.env.SUPADATA_API_KEY || process.env.APIFY_API_TOKEN),
+      transcriptionAccount: await readTranscriptAccount(process.env.SUPADATA_API_KEY),
+      transcriptionFallback: { provider: "apify", ...await apify.account(process.env.APIFY_API_TOKEN) }
     });
   }
   if (pathname === "/api/captures" && req.method === "GET") {
@@ -1315,10 +1364,10 @@ export async function handleApi(req, res, pathname, schedule = (work) => void wo
     if (!capture) return json(res, 404, { error: "Capture not found" });
     const previousReadyCapture = capture.status === "ready" ? { ...capture } : null;
     if (!capture.transcript && capture.transcriptStatus === "failed") {
-      const account = await readTranscriptAccount(process.env.SUPADATA_API_KEY);
-      if (account.status === "exhausted" || account.status === "invalid") return json(res, 409, { error: "Transcription is blocked. Check Supadata and recheck the connection, or add context. Your save is unchanged." });
+      const access = await transcriptAccess(capture);
+      if (!access.available) return json(res, 409, { error: access.error });
+      await resetFailedApifyJob(capture);
       capture.transcriptStatus = "queued";
-      capture.transcriptJobId = "";
       capture.transcriptAttemptCount = 0;
       capture.transcriptError = "";
     }
@@ -1345,20 +1394,20 @@ export async function handleApi(req, res, pathname, schedule = (work) => void wo
 
   const transcriptMatch = pathname.match(/^\/api\/captures\/([^/]+)\/transcribe$/);
   if (transcriptMatch && req.method === "POST") {
-    if (!process.env.SUPADATA_API_KEY) return json(res, 503, { error: "Connect a Supadata API key before spending transcript credits." });
+    if (!(process.env.SUPADATA_API_KEY || process.env.APIFY_API_TOKEN)) return json(res, 503, { error: "Connect Supadata or Apify before requesting a transcript." });
     const capture = await findCapture(transcriptMatch[1]);
     if (!capture) return json(res, 404, { error: "Capture not found" });
     if ((capture.transcriptStatus === "processing" || capture.transcriptStatus === "queued") && !isStaleTranscript(capture)) return json(res, 202, capture);
     if (capture.transcript) return json(res, 200, capture);
-    const account = await readTranscriptAccount(process.env.SUPADATA_API_KEY);
-    if (account.status === "exhausted" || account.status === "invalid") return json(res, 409, { error: "Transcription is blocked. Check Supadata and recheck the connection, or add context. Your save is unchanged." });
+    const access = await transcriptAccess(capture);
+    if (!access.available) return json(res, 409, { error: access.error });
     const previousReadyCapture = capture.status === "ready" ? { ...capture } : null;
     const restartTranscript = capture.transcriptStatus === "failed";
     capture.intents = [...new Set([...intentsForCapture(capture), "script"])];
     capture.transcriptStatus = "queued";
     capture.transcriptError = "";
     if (restartTranscript) {
-      capture.transcriptJobId = "";
+      await resetFailedApifyJob(capture);
       capture.transcriptAttemptCount = 0;
     }
     await upsertCapture(capture);

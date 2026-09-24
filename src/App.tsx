@@ -58,6 +58,8 @@ type ApiCapture = {
   transcriptStatus?: "not-requested" | "queued" | "processing" | "ready" | "failed";
   transcriptLanguage?: string;
   transcriptCredits?: number;
+  transcriptProvider?: "supadata" | "apify";
+  transcriptJobId?: string;
   transcriptError?: string;
   intents?: CaptureIntent[];
   sourceCoverage?: "complete" | "partial" | "insufficient";
@@ -203,7 +205,7 @@ type LibraryPayload = {
   memberships?: ApiKnowledgeMembership[];
   connections?: ApiKnowledgeConnection[];
 };
-type ApiHealth = { ok: boolean; provider: string; configured: boolean; providerStatus: "missing" | "configured" | "connected" | "invalid"; model: string; protected: boolean; transcriptionConfigured?: boolean; transcriptionProvider?: string; transcriptionAccount?: { status: "missing" | "invalid" | "unknown" | "available" | "exhausted"; remainingCredits?: number; usedCredits?: number; maxCredits?: number } };
+type ApiHealth = { ok: boolean; provider: string; configured: boolean; providerStatus: "missing" | "configured" | "connected" | "invalid"; model: string; protected: boolean; transcriptionConfigured?: boolean; transcriptionProvider?: string; transcriptionAccount?: { status: "missing" | "invalid" | "unknown" | "available" | "exhausted"; remainingCredits?: number; usedCredits?: number; maxCredits?: number }; transcriptionFallback?: { provider: string; status: "missing" | "invalid" | "unknown" | "available" | "exhausted" | "paid-plan-blocked"; remainingCreditsUsd?: number } };
 type ApiAskResponse = {
   answer: string;
   model: string;
@@ -274,7 +276,7 @@ function captureStatusCopy(capture: ApiCapture) {
   if (transcriptWorking) return "Reading the spoken words. Spool will continue automatically, even if you leave this page.";
   if (capture.transcriptStatus === "failed") {
     if (/no spoken words/i.test(capture.transcriptError || "")) return "No speech was detected. This Reel stays saved, but it cannot create a script.";
-    if (/limit[ -]exceeded|quota|insufficient credits/i.test(capture.transcriptError || "")) return "This Reel is saved. Supadata reached a usage or request limit. Check your allowance before retrying, or add the useful text as context.";
+    if (/limit[ -]exceeded|quota|insufficient credits/i.test(capture.transcriptError || "")) return "This Reel is saved. A transcript provider reached its limit. Recheck the connections, then retry this save or add context.";
     return "The transcript did not finish. Retry the transcript to continue.";
   }
   if (capture.status === "failed" && /401|authentication_error|api key is invalid/i.test(capture.error || "")) return "Anthropic rejected the API key. Replace it in Vercel, then retry analysis.";
@@ -461,7 +463,7 @@ function CaptureInbox({
             {capture.transcriptError && !capture.transcript ? <div className="transcript-error"><AlertCircle size={13} /><span>{capture.transcriptError}</span></div> : null}
             {capture.transcript && transcriptOpen ? (
               <section className="transcript-sheet" aria-label={`Transcript for ${capture.title || "saved source"}`}>
-                <header><span><AudioLines size={14} /> Audio thread</span><small>{capture.transcriptLanguage ? capture.transcriptLanguage.toUpperCase() : "Auto-detected"}{capture.transcriptCredits ? ` · ${capture.transcriptCredits} credits` : ""}</small></header>
+                <header><span><AudioLines size={14} /> Audio thread</span><small>{capture.transcriptLanguage ? capture.transcriptLanguage.toUpperCase() : "Auto-detected"}{capture.transcriptProvider === "apify" ? " · Apify" : capture.transcriptCredits ? ` · ${capture.transcriptCredits} credits` : ""}</small></header>
                 <p>{capture.transcript}</p>
                 <div><span>Hook</span><strong>{capture.hook || "Claude will identify the hook after processing."}</strong></div>
                 <div><span>Script structure</span><strong>{capture.structure || "Claude will map the script after processing."}</strong></div>
@@ -1895,8 +1897,9 @@ function SetupView({ onCapture, health }: { onCapture: () => void; health: ApiHe
         <div className={`connection-card transcript-connection ${health?.transcriptionConfigured ? "connected" : "demo"}`}>
           <span><AudioLines size={17} /></span>
           <div>
-            <strong>{health?.transcriptionAccount?.status === "exhausted" ? "Transcript credits used up" : health?.transcriptionAccount?.status === "invalid" ? "Supadata key needs attention" : health?.transcriptionConfigured ? "Selective transcripts · Supadata" : "Selective transcripts are optional"}</strong>
-            <p>{health?.transcriptionConfigured ? "Transcripts use credits for Script saves and Knowledge saves whose captions lack the lesson. Browsing existing notes is free." : "Connect Supadata to add spoken-word scripts only to the Reels worth studying."}</p>
+            <strong>{health?.transcriptionFallback?.status === "available" ? "Apify backup ready" : health?.transcriptionAccount?.status === "exhausted" ? "Transcript credits used up" : health?.transcriptionAccount?.status === "invalid" ? "Supadata key needs attention" : health?.transcriptionConfigured ? "Selective transcripts connected" : "Selective transcripts are optional"}</strong>
+            <p>{health?.transcriptionConfigured ? "Script saves and Knowledge saves with incomplete captions can request transcripts. Apify backs up Supadata for Instagram Reels, using only its Free-plan allowance. Browsing existing notes uses no AI credits." : "Connect Supadata or Apify to add spoken-word scripts to the Reels worth studying."}</p>
+            {health?.transcriptionFallback && health.transcriptionFallback.status !== "missing" ? <small>{health.transcriptionFallback.status === "available" ? `$${health.transcriptionFallback.remainingCreditsUsd?.toFixed(2)} of Apify free allowance left. Each job is capped at $0.05 of that allowance.` : health.transcriptionFallback.status === "paid-plan-blocked" ? "Apify backup paused: only the Free plan is allowed." : health.transcriptionFallback.status === "exhausted" ? "Apify free allowance is too low for another job. Wait for its reset." : "Apify backup could not be verified. Check the token and its permissions, then recheck the connection."}</small> : null}
           </div>
         </div>
 
@@ -2286,7 +2289,8 @@ export default function App() {
   const blockedSaves = library.captures.filter((capture) => capture.status === "needs-context" || capture.status === "failed" || capture.transcriptStatus === "failed");
   const limitCount = library.captures.filter((capture) => /limit[ -]exceeded|quota|insufficient credits/i.test(capture.transcriptError || "")).length;
   const transcriptAccount = health?.transcriptionAccount;
-  const transcriptBlocked = transcriptAccount?.status === "exhausted" || transcriptAccount?.status === "invalid";
+  const backupReady = health?.transcriptionFallback?.status === "available";
+  const transcriptBlocked = !backupReady && (transcriptAccount?.status === "exhausted" || transcriptAccount?.status === "invalid" || transcriptAccount?.status === "missing");
 
   const postCaptureAction = async (path: string, options: RequestInit = {}) => {
     try {
@@ -2303,8 +2307,8 @@ export default function App() {
   };
 
   const retryCapture = async (capture: ApiCapture) => {
-    if (!capture.transcript && capture.transcriptStatus === "failed" && transcriptBlocked) {
-      setToast("Transcription is blocked. Check Supadata, then recheck the connection. You can still add context.");
+    if (!capture.transcript && !capture.transcriptJobId && capture.transcriptStatus === "failed" && transcriptBlocked) {
+      setToast("Transcription is paused. Recheck the provider connections, or add context.");
       return;
     }
     if (await postCaptureAction(`/api/captures/${capture.id}/retry`)) {
@@ -2329,12 +2333,12 @@ export default function App() {
 
   const transcribeCapture = async (capture: ApiCapture) => {
     if (capture.transcript) { setActive("scripts"); return; }
-    if (transcriptBlocked) {
-      setToast("Transcription is blocked. Check Supadata, then recheck the connection. Your Reel is saved.");
+    if (transcriptBlocked && !capture.transcriptJobId) {
+      setToast("Transcription is paused. Recheck the provider connections. Your Reel is saved.");
       return;
     }
     if (await postCaptureAction(`/api/captures/${capture.id}/transcribe`)) {
-      setToast("Transcript requested. Supadata credits may be used.");
+      setToast("Transcript requested. Spool will use an available provider's allowance.");
       await refreshLibrary();
       return;
     }
@@ -2348,9 +2352,9 @@ export default function App() {
         <div className="mobile-brand"><SpoolMark /><span>spool</span><div><button aria-label="Ask Spool" onClick={() => setAskOpen(true)}><Sparkles size={17} /></button><button aria-label="Open iPhone capture setup" onClick={() => setActive("setup")}><Menu size={19} /></button></div></div>
         {libraryError ? <div className="service-notice" role="alert"><p>{libraryError}</p><button onClick={() => void refreshLibrary()}>Try loading again</button></div> : !libraryLoaded ? <div className="service-notice" role="status">Loading your saved library…</div> : null}
         {libraryLoaded && blockedSaves.length && (active === "briefing" || active === "setup") ? <section className="service-notice" aria-label="Processing status">
-          <div><strong>{transcriptAccount?.status === "exhausted" ? "Transcript credits used up" : transcriptAccount?.status === "invalid" ? "Supadata connection needs attention" : `${blockedSaves.length} saves need attention`}</strong>
-            <p>{transcriptAccount?.status === "exhausted" ? `${transcriptAccount.usedCredits} of ${transcriptAccount.maxCredits} Supadata credits used. New transcripts must wait for a reset or more credits.` : transcriptAccount?.status === "invalid" ? "Supadata rejected the configured key. Update it in Vercel to restore transcription." : limitCount ? `${limitCount} saves hit a Supadata limit. Check the allowance before retrying.` : "Some sources need more context or an analysis retry."} Your links and existing notes are safe.</p>
-            <div className="service-actions"><button onClick={() => setRecoveryOpen((open) => !open)} aria-expanded={recoveryOpen}>{recoveryOpen ? "Hide affected saves" : `Review affected saves (${blockedSaves.length})`}</button><button disabled={checkingHealth} onClick={() => void refreshHealth()}>{checkingHealth ? "Checking…" : "Recheck connection"}</button><a href="https://dash.supadata.ai" target="_blank" rel="noreferrer">Check Supadata <ExternalLink size={12} /></a></div>
+          <div><strong>{backupReady ? "Backup ready · recover a saved Reel" : transcriptAccount?.status === "exhausted" ? "Transcript credits used up" : transcriptAccount?.status === "invalid" ? "Supadata connection needs attention" : `${blockedSaves.length} saves need attention`}</strong>
+            <p>{backupReady ? `Apify can transcribe Instagram Reels when Supadata is unavailable. $${health?.transcriptionFallback?.remainingCreditsUsd?.toFixed(2)} of free allowance remains. Choose an affected save below and retry it.` : transcriptAccount?.status === "exhausted" ? `${transcriptAccount.usedCredits} of ${transcriptAccount.maxCredits} Supadata credits used. No verified backup allowance is available; recheck the connection or wait for a reset.` : transcriptAccount?.status === "invalid" ? "Supadata rejected the configured key. Update it in Vercel or connect the Apify backup." : limitCount ? `${limitCount} saves hit a transcript limit. Recheck the connections before retrying.` : "Some sources need more context or an analysis retry."} Your links and existing notes are safe.</p>
+            <div className="service-actions"><button onClick={() => setRecoveryOpen((open) => !open)} aria-expanded={recoveryOpen}>{recoveryOpen ? "Hide affected saves" : `Review affected saves (${blockedSaves.length})`}</button><button disabled={checkingHealth} onClick={() => void refreshHealth()}>{checkingHealth ? "Checking…" : "Recheck connection"}</button><a href="https://dash.supadata.ai" target="_blank" rel="noreferrer">Check Supadata <ExternalLink size={12} /></a>{health?.transcriptionFallback?.status !== "missing" ? <a href="https://console.apify.com" target="_blank" rel="noreferrer">Check Apify <ExternalLink size={12} /></a> : null}</div>
             <small>No bulk retries. Choose a save to retry, or add context without requesting a transcript.</small>
           </div>
           {recoveryOpen ? <BriefingSourceIndex captures={blockedSaves} onRetry={retryCapture} onAddContext={setContextCapture} onTranscribe={transcribeCapture} /> : null}

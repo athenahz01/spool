@@ -28,7 +28,8 @@ Spool turns explicitly shared Instagram Reels, creator profiles, YouTube videos,
 - Hook and Script banks with category search, opening-pattern filters, reusable script shapes, and zero-cost browsing/copying
 - Zero-cost Second Brain browsing and regrouping: opening playbooks, changing filters, and exploring the map never calls Claude or Supadata
 - A regression test that verifies library and playbook generation performs no external fetches
-- Supadata account checks (cached for one minute) that distinguish exhausted credits from a configured key; exhausted/invalid accounts cannot start new transcripts
+- Supadata account checks (cached for one minute) that distinguish exhausted credits from a configured key; exhausted/invalid accounts cannot start new Supadata transcripts
+- Optional Apify Free-plan fallback for Instagram speech, with allowance checks, a $0.05 maximum run cost, and durable duplicate-job protection
 - A visible processing-status panel with all affected saves, pagination, context recovery without transcription, and explicit library-loading errors
 - Unicode-safe provider input and automatic-retry protection for permanent provider errors; optional transcript failures preserve ready notes
 - Ask Spool with free on-device retrieval, evidence links, optional one-request Claude synthesis, and a 12-answer device cache
@@ -61,10 +62,21 @@ Environment variables:
 - `ANTHROPIC_ASK_MODEL`: optional lower-cost model override used only for explicit Ask Spool synthesis.
 - `DATABASE_URL`: Neon Postgres connection string used by Vercel.
 - `SUPADATA_API_KEY`: optional; unlocks selective spoken-word transcripts for public videos.
+- `APIFY_API_TOKEN`: optional Instagram Reel transcription backup. Requires `DATABASE_URL`; tokens stay server-side. Only verified Free plans with at least $0.05 remaining are allowed.
 - `SPOOL_CAPTURE_TOKEN`: optional bearer token protecting the capture endpoint on a public deployment.
 - `PORT`: defaults to `8787`.
 
-The enrichment path uses Anthropic's Messages API, structured outputs, and the web-fetch tool limited to the shared URL's domain. A Knowledge save first uses the public caption/page text. Claude marks that source coverage complete, partial, or insufficient; only the latter two may trigger Supadata. Public social pages are sometimes inaccessible to automated readers, so Spool marks unverifiable sources `needs-context` rather than inventing details.
+The enrichment path uses Anthropic's Messages API, structured outputs, and the web-fetch tool limited to the shared URL's domain. A Knowledge save first uses the public caption/page text. Claude marks that source coverage complete, partial, or insufficient; only the latter two may trigger transcription. Public social pages are sometimes inaccessible to automated readers, so Spool marks unverifiable sources `needs-context` rather than inventing details.
+
+### Transcript fallback and cost controls
+
+Supadata stays the primary provider. If it is missing, exhausted, rejects a request, or reports a definitively failed job, Instagram Reel links can use `steadyfetch/instagram-reel-transcript-scraper` on Apify. Pending Supadata jobs are polled, not duplicated on another provider. Ambiguous network failures do not immediately start another job.
+
+Spool verifies Apify's Free plan and remaining monthly allowance before every new run. It limits each run to one Reel, no visual extraction, a $0.05 maximum charge against the free allowance, and a 180-second timeout. It does not upgrade plans, configure recharge, or permit paid-plan runs. The community actor runs with limited permissions. This is a limited monthly allowance, not unlimited free transcription; Claude analysis remains separately metered.
+
+The `spool_transcript_jobs` table uniquely claims each Instagram shortcode before starting a run. Continuations resume the recorded run, completed transcripts are cached, and a start with an uncertain outcome stays locked to prevent duplicate charges. Confirmed failed jobs can be cleared by an explicit user retry. An ambiguous start requires checking Apify's run history before an operator resolves the job record. Never clear an uncertain job blindly.
+
+`GET /api/health` reports safe provider status and remaining allowance, not credentials or account identifiers. Old failed saves are not bulk-retried. In Briefing, review affected saves and retry the ones worth recovering. Each recovered transcript can then trigger the usual Claude analysis.
 
 ## iPhone capture
 
