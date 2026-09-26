@@ -32,9 +32,10 @@ import {
   Wifi,
   X
 } from "lucide-react";
+import { House, FolderOpen, Cpu, Clapperboard, BriefcaseBusiness, Rocket, Heart, Network } from "lucide-react";
 import { creators, navCounts, sources, type Source } from "./data";
 
-type View = "briefing" | "threads" | "scripts" | "creators" | "setup";
+type View = "briefing" | "threads" | "scripts" | "creators" | "setup" | "map";
 type CaptureIntent = "knowledge" | "script" | "creator";
 type ApiCapture = {
   id: string;
@@ -286,10 +287,11 @@ function captureStatusCopy(capture: ApiCapture) {
 }
 
 const navItems: Array<{ id: View; label: string; icon: typeof Compass; count?: number }> = [
-  { id: "briefing", label: "Briefing", icon: Compass },
-  { id: "threads", label: "Second Brain", icon: Layers3, count: navCounts.threads },
-  { id: "scripts", label: "Banks", icon: AudioLines },
+  { id: "briefing", label: "Home", icon: House },
+  { id: "threads", label: "Library", icon: FolderOpen },
+  { id: "scripts", label: "Hook & script bank", icon: FileText },
   { id: "creators", label: "Creators", icon: UsersRound, count: navCounts.creators },
+  { id: "map", label: "Brain map", icon: Network },
   { id: "setup", label: "iPhone capture", icon: Share2 }
 ];
 
@@ -302,19 +304,18 @@ function SpoolMark() {
   );
 }
 
-function Sidebar({ active, onNavigate, onCapture, liveThreadCount, liveScriptCount, liveCreatorCount }: { active: View; onNavigate: (view: View) => void; onCapture: () => void; liveThreadCount: number; liveScriptCount: number; liveCreatorCount: number }) {
+function Sidebar({ active, onNavigate }: { active: View; onNavigate: (view: View) => void }) {
   return (
     <aside className="sidebar">
       <div className="brand-row">
-        <SpoolMark />
-        <span className="brand-name">spool</span>
+        <img src="/spool-mark.svg" width="32" height="32" alt="" />
+        <span className="brand-name">Spool</span>
       </div>
 
       <nav className="side-nav" aria-label="Main navigation">
         <p className="nav-label">Your library</p>
-        {navItems.map((item) => {
+        {navItems.filter((item) => item.id !== "setup").map((item) => {
           const Icon = item.icon;
-          const count = item.id === "threads" ? liveThreadCount || navCounts.threads : item.id === "scripts" ? liveScriptCount : item.id === "creators" ? navCounts.creators + liveCreatorCount : item.count;
           return (
             <button
               key={item.id}
@@ -322,55 +323,43 @@ function Sidebar({ active, onNavigate, onCapture, liveThreadCount, liveScriptCou
               onClick={() => onNavigate(item.id)}
               aria-label={item.label}
               title={item.label}
+              aria-current={active === item.id ? "page" : undefined}
             >
               <Icon size={17} strokeWidth={1.8} />
               <span>{item.label}</span>
-              {count ? <span className="nav-count">{count}</span> : null}
             </button>
           );
         })}
       </nav>
 
       <div className="sidebar-spacer" />
-      <button className="capture-side" onClick={onCapture} aria-label="Add link" title="Add link">
-        <span className="capture-icon"><Plus size={16} /></span>
-        <span>
-          <strong>Test a link</strong>
-          <small>Desktop capture</small>
-        </span>
-      </button>
+      <button className={`club-settings ${active === "setup" ? "active" : ""}`} onClick={() => onNavigate("setup")}><Settings2 size={20} /> Capture & settings</button>
       <div className="profile-row">
-        <span className="avatar avatar-small">Y</span>
+        <UserRound size={24} aria-hidden="true" />
         <span>
           <strong>Your Spool</strong>
           <small>Personal library</small>
         </span>
-        <MoreHorizontal size={17} />
       </div>
     </aside>
   );
 }
 
-function Header({ active, onCapture, onAsk }: { active: View; onCapture: () => void; onAsk: () => void }) {
+function Header({ active, onCapture, onAsk, onSettings }: { active: View; onCapture: () => void; onAsk: () => void; onSettings: () => void }) {
   const titles: Record<View, string> = {
-    briefing: "Briefing",
-    threads: "Second Brain",
+    briefing: "Home",
+    threads: "Library",
     scripts: "Hook & script banks",
     creators: "Creator notes",
-    setup: "iPhone capture"
+    setup: "Capture and settings",
+    map: "Brain map"
   };
 
   return (
     <header className="topbar">
-      <div>
-        <span className="topbar-kicker">Your Spool</span>
-        <span className="topbar-separator">/</span>
-        <strong>{titles[active]}</strong>
-      </div>
-      <div className="topbar-actions">
-        <button className="ask-spool-button" onClick={onAsk}><Sparkles size={14} /> Ask Spool <kbd>⌘K</kbd></button>
-        <button className="quiet-button" onClick={onCapture}><Plus size={16} /> Add link</button>
-      </div>
+      <button className="club-search" onClick={onAsk} aria-label={`Ask Spool or search your library from ${titles[active]}`}><Search size={21} /><span>Ask Spool anything…</span><kbd>Ctrl / ⌘ K</kbd></button>
+      <button className="club-add" onClick={onCapture}><Link2 size={18} /> Add link</button>
+      <button className="club-mobile-settings" aria-label="Capture and settings" onClick={onSettings}><Settings2 size={20} /></button>
     </header>
   );
 }
@@ -682,6 +671,69 @@ function Briefing({ onNavigate, onOpenThread, library, onRetry, onAddContext, on
   );
 }
 
+const topicIcons: Record<string, typeof BookOpen> = {
+  "Content Creation": Clapperboard, "AI Products": Cpu, Career: BriefcaseBusiness,
+  Recruiting: UsersRound, Startups: Rocket, "Personal Growth": Heart, "Vlogs & Life": Compass
+};
+const captureMessage = captureStatusCopy;
+
+function ReadingHome({ library, onNavigate, onOpenCategory, onRecover, blockedCount, onRetry, onAddContext, onTranscribe }: {
+  library: LibraryPayload; onNavigate: (view: View) => void; onOpenCategory: (id: string) => void;
+  onRecover: () => void; blockedCount: number; onRetry: (capture: ApiCapture) => void;
+  onAddContext: (capture: ApiCapture) => void; onTranscribe: (capture: ApiCapture) => void;
+}) {
+  const [topicId, setTopicId] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [allTopics, setAllTopics] = useState(false);
+  const preferredTopics = ["Content Creation", "AI Products", "Career", "Startups"];
+  const topics = library.categories.filter((category) => category.sourceCount > 0).sort((a,b) => {
+    const rank = (name: string) => preferredTopics.includes(name) ? preferredTopics.indexOf(name) : 10;
+    return rank(a.name) - rank(b.name);
+  });
+  const topic = topics.find((category) => category.id === topicId) || topics.find((category) => category.name === "Content Creation") || topics[0];
+  const ready = library.captures.filter((capture) => capture.status === "ready" && capture.sourceCoverage !== "insufficient");
+  const topicSources = ready.filter((capture) => topic?.sourceIds.includes(capture.id));
+  const featured = topicSources.find((capture) => capture.takeaways?.length) || topicSources[0];
+  const savedHook = (topicSources.length ? topicSources : ready).find((capture) => capture.transcript?.trim() && capture.hook?.trim());
+  const recent = showAll ? library.captures : library.captures.slice(0, 4);
+  const today = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date());
+
+  return <div className="club-home">
+    <div className="club-feed">
+      <header className="club-welcome"><span>{today}</span><h1>Worth coming back to.</h1><p>From the things you saved.</p></header>
+      <article className="club-feature">
+        <div className="club-feature-copy">
+          <span className="club-feature-meta">{topic?.name || "Your library"} <span>· From your saved Reels</span></span>
+          <h2>{featured?.title || (topic ? `Your guide to ${topic.name}` : "Your next good idea starts here.")}</h2>
+          <p>{featured?.takeaways?.[0] || featured?.summary || "Share something worth keeping. Find its useful ideas here, with the original always one click away."}</p>
+          <button className="club-primary" onClick={() => topic ? onOpenCategory(topic.id) : onNavigate("setup")}>{topic ? "Read the guide" : "Set up saving"}<ArrowRight size={18} /></button>
+        </div>
+        <img src="/reading-club-desk.png" alt="" className="club-feature-image" />
+      </article>
+      <section className="club-recent" aria-labelledby="club-recent-title">
+        <header><h2 id="club-recent-title">Recently saved</h2><button onClick={() => setShowAll((all) => !all)} aria-expanded={showAll}>{showAll ? "Show less" : `See all ${library.captures.length || ""}`}<ArrowRight size={16} /></button></header>
+        {!recent.length ? <div className="club-empty"><Inbox size={28} /><h3>A little less scrolling. A little more keeping.</h3><p>Your first shared Reel will appear here.</p><button className="club-primary" onClick={() => onNavigate("setup")}>Connect your iPhone<ArrowRight size={16} /></button></div> : recent.map((capture) => {
+          const TopicIcon = topicIcons[capture.contentCategory || ""] || BookOpen;
+          const open = expandedId === capture.id;
+          return <article className="club-save" key={capture.id}>
+            <button className="club-save-open" aria-expanded={open} onClick={() => setExpandedId(open ? null : capture.id)}>
+              <span className="club-save-icon"><TopicIcon size={28} strokeWidth={1.5} /></span>
+              <span className="club-save-copy"><small>{capture.contentCategory || "Saved source"} · {capture.creator || capture.platform || "Instagram"}</small><strong>{capture.title || "Saved Reel"}</strong><span>{capture.status === "ready" ? capture.summary : captureMessage(capture)}</span><em>{capture.status === "ready" ? <Bookmark size={13} /> : <AlertCircle size={13} />}{capture.status === "ready" ? formatSavedDate(capture.capturedAt) : capture.status === "queued" || capture.status === "processing" ? "Processing" : "Needs attention"}</em></span><ChevronRight size={18} />
+            </button>
+            {open ? <div className="club-save-details">{capture.takeaways?.length ? <ul>{capture.takeaways.map((line) => <li key={line}>{line}</li>)}</ul> : null}<div className="club-save-actions"><a href={capture.url} target="_blank" rel="noreferrer">Original Reel<ExternalLink size={14} /></a>{capture.transcript ? <button onClick={() => onNavigate("scripts")}><FileText size={14} />Script bank</button> : <button disabled={capture.transcriptStatus === "processing" || capture.transcriptStatus === "queued"} onClick={() => onTranscribe(capture)}><AudioLines size={14} />{capture.transcriptStatus === "processing" || capture.transcriptStatus === "queued" ? "Transcribing…" : "Transcribe"}</button>}<button onClick={() => onAddContext(capture)}>Add context</button>{capture.status === "failed" || capture.status === "needs-context" ? <button onClick={() => onRetry(capture)}>Retry</button> : null}</div></div> : null}
+          </article>;
+        })}
+      </section>
+    </div>
+    <aside className="club-discover">
+      <section><h2>Explore topics</h2><nav aria-label="Explore topics">{(allTopics ? topics : topics.slice(0,4)).map((category) => { const Icon = topicIcons[category.name] || BookOpen; return <button key={category.id} aria-pressed={topic?.id === category.id} onClick={() => setTopicId(category.id)}><span className="club-topic-icon"><Icon size={22} strokeWidth={1.6} /></span><span>{category.name}<small>{category.sourceCount} saves</small></span><ChevronRight size={16} /></button>; })}</nav>{topics.length > 4 ? <button className="club-all-topics" onClick={() => setAllTopics(!allTopics)} aria-expanded={allTopics}>{allTopics ? "Show fewer topics" : `All ${topics.length} topics`}<ChevronRight size={14} /></button> : null}</section>
+      {savedHook ? <section className="club-hook-section"><h2>A hook worth keeping</h2><div className="club-hook"><span><Quote size={17} /> FROM YOUR SCRIPT BANK</span><blockquote>“{savedHook.hook}”</blockquote><a href={savedHook.url} target="_blank" rel="noreferrer">{savedHook.creator || "Original Reel"}<ExternalLink size={13} /></a><button onClick={() => onNavigate("scripts")}>Explore hooks<ArrowRight size={16} /></button></div></section> : null}
+      <section className="club-attention"><button onClick={blockedCount ? onRecover : () => onNavigate("threads")}><span>{blockedCount ? <AlertCircle size={18} /> : <Check size={18} />}{blockedCount ? `${blockedCount} saves need attention` : "Your library is up to date"}</span><ChevronRight size={17} /></button><p>{blockedCount ? "Your links are safe. Review them when you’re ready." : `${library.captures.length} sources, ready to come back to.`}</p></section>
+    </aside>
+  </div>;
+}
+
 function categoryGuide(category: ApiCategory, captures: ApiCapture[]): ApiGuide {
   if (category.guide) return category.guide;
   const sources = captures.filter((capture) => category.sourceIds.includes(capture.id));
@@ -986,10 +1038,10 @@ function SourceLibrary({ library }: { library: LibraryPayload }) {
   }), [domain, library.knowledgeItems, query, type]);
 
   return <div className="source-library-page">
-    {library.recovery.length ? <section className="recovery-inbox"><div><Inbox size={17} /><span><small>RECOVERY INBOX</small><strong>{library.recovery.length} saved {library.recovery.length === 1 ? "source needs" : "sources need"} more context</strong></span></div><p>They stay out of your playbooks until the lesson can be verified. Repair them from Briefing when you have context or transcript credits.</p></section> : null}
+    {library.recovery.length ? <section className="recovery-inbox"><div><Inbox size={17} /><span><small>RECOVERY INBOX</small><strong>{library.recovery.length} saved {library.recovery.length === 1 ? "source needs" : "sources need"} more context</strong></span></div><p>They stay out of your playbooks until the lesson can be verified. Open Capture &amp; settings to review them when you have context or transcript credits.</p></section> : null}
     <section className="source-library-toolbar">
       <div><small>Source library</small><h2>Every saved piece of evidence</h2><p>Filter the raw material without changing or reprocessing it.</p></div>
-      <label><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search titles, ideas, creators…" /></label>
+      <label><Search size={14} /><input aria-label="Search saved sources" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search titles, ideas, creators…" /></label>
       <div>{domains.map((item) => <button key={item} className={domain === item ? "active" : ""} onClick={() => setDomain(item)}>{item}</button>)}</div>
       <div>{types.map((item) => <button key={item} className={type === item ? "active" : ""} onClick={() => setType(item)}>{item}</button>)}</div>
     </section>
@@ -1011,14 +1063,16 @@ function SourceLibrary({ library }: { library: LibraryPayload }) {
   </div>;
 }
 
-function ThreadsView({ library, onTranscribe }: { library: LibraryPayload; onTranscribe: (capture: ApiCapture) => void }) {
+function ThreadsView({ library, onTranscribe, categoryId, onCloseCategory, onMap }: { library: LibraryPayload; onTranscribe: (capture: ApiCapture) => void; categoryId?: string; onCloseCategory: () => void; onMap: () => void }) {
   const [mode, setMode] = useState<"playbooks" | "map" | "sources">("playbooks");
+  const selectedCategory = library.categories.find((category) => category.id === categoryId);
+  if (selectedCategory) return <div className="club-category-guide"><KnowledgeGuide category={selectedCategory} captures={library.captures} accent={categoryAccents[selectedCategory.name] || categoryAccents.Other} onClose={onCloseCategory} onOpenSource={(id) => { const source = library.captures.find((capture) => capture.id === id); if (source) window.open(source.url, "_blank", "noopener,noreferrer"); }} /></div>;
   return <div className={`second-brain-page mode-${mode}`}>
     <header className="second-brain-header">
-      <div><span className="eyebrow"><Link2 size={12} /> Your connected knowledge</span><h1>From saved Reels to <em>working knowledge.</em></h1><p>Start with a playbook when you want to use what you learned. Open the map when you want to explore.</p></div>
+      <div><span className="eyebrow">Your reading shelf</span><h1>The good stuff, together.</h1><p>Practical guides from your saves. Every idea leads back to its source.</p></div>
       <nav aria-label="Second Brain view">
         <button className={mode === "playbooks" ? "active" : ""} onClick={() => setMode("playbooks")}><BookOpen size={14} /> Playbooks</button>
-        <button className={mode === "map" ? "active" : ""} onClick={() => setMode("map")}><Share2 size={14} /> Map</button>
+        <button onClick={onMap}><Share2 size={14} /> Brain map</button>
         <button className={mode === "sources" ? "active" : ""} onClick={() => setMode("sources")}><FileText size={14} /> Sources</button>
       </nav>
     </header>
@@ -1692,8 +1746,8 @@ function ScriptBankView({ library }: { library: LibraryPayload }) {
       <header className="script-bank-masthead">
         <div>
           <span className="date-line">Your creation library</span>
-          <h1>Creation <em>banks.</em></h1>
-          <p>Find the opening that made you stop, study the full delivery, then reuse the shape in your own voice.</p>
+          <h1>Openings worth borrowing.</h1>
+          <p>Your saved hooks and full scripts. Study the structure, then make it yours.</p>
         </div>
         <div className="script-bank-stats" aria-label="Script bank summary">
           <span><strong>{scripts.length}</strong> scripts</span><i /><span><strong>{scripts.length}</strong> hooks</span><i /><span><strong>{creatorCount}</strong> creators</span>
@@ -1705,7 +1759,7 @@ function ScriptBankView({ library }: { library: LibraryPayload }) {
           <button role="tab" aria-selected={mode === "hooks"} className={mode === "hooks" ? "active" : ""} onClick={() => setMode("hooks")}><Quote size={13} /> Hooks <span>{scripts.length}</span></button>
           <button role="tab" aria-selected={mode === "scripts"} className={mode === "scripts" ? "active" : ""} onClick={() => setMode("scripts")}><FileText size={13} /> Scripts <span>{scripts.length}</span></button>
         </div>
-        <label className="bank-search"><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search words, creators, or topics…" /></label>
+        <label className="bank-search"><Search size={14} /><input aria-label="Search hooks and scripts" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search words, creators, or topics…" /></label>
       </section>
 
       <nav className="bank-categories" aria-label="Filter by knowledge area">
@@ -1790,18 +1844,19 @@ function CreatorsView({ library }: { library: LibraryPayload }) {
     engine: item.structures[0]?.split(/→|->/).map((step) => step.trim()).filter(Boolean).slice(0, 5) || ["Save examples", "Compare structures", "Run your own experiment"],
     sourceIds: item.sourceIds
   }));
-  const allCreators = [...liveCreators, ...creators.filter((seed) => !liveCreators.some((live) => live.handle === seed.handle))];
-  const [selectedCreator, setSelectedCreator] = useState(allCreators[0].id);
+  const allCreators = liveCreators;
+  const [selectedCreator, setSelectedCreator] = useState(allCreators[0]?.id || "");
   const creator = allCreators.find((item) => item.id === selectedCreator) ?? allCreators[0];
+  if (!creator) return <div className="page creators-page club-empty"><UsersRound size={32} /><h1>Your people, your inspiration.</h1><p>Choose the Creator label when saving a Reel to start a collection here.</p></div>;
 
   return (
     <div className="page creators-page">
       <section className="page-intro compact-intro">
         <div>
           <span className="date-line">Patterns, not imitation</span>
-          <h1>Creator<br /><em>playbooks.</em></h1>
+          <h1>Your people,<br />your inspiration.</h1>
         </div>
-        <p className="intro-copy">Spool studies what repeats across the creators you save, then turns those patterns into experiments for your own voice.</p>
+        <p className="intro-copy">The creators you chose to study. Their recurring topics, hooks, and structures, in one place.</p>
       </section>
 
       <div className="creator-tabs" role="tablist">
@@ -1884,7 +1939,7 @@ function SetupView({ onCapture, health }: { onCapture: () => void; health: ApiHe
       <section className="setup-copy">
         <span className="date-line">One-time setup · about 2 minutes</span>
         <h1>One tap from<br /><em>any reel.</em></h1>
-        <p className="setup-lede">The Shortcut receives the Instagram link, sends it to your private Spool, and gets out of the way. No labels. No folders. No decisions.</p>
+        <p className="setup-lede">Share a Reel to Spool from your iPhone. Choose what to keep—knowledge, script, or creator—and come back when you need it.</p>
 
         <div className={`connection-card ${connectionCopy.state}`}>
           <span>{connectionCopy.state === "connected" ? <Wifi size={17} /> : <AlertCircle size={17} />}</span>
@@ -2008,7 +2063,43 @@ function searchSpool(question: string, library: LibraryPayload): LocalAskResult 
   };
 }
 
+function useModalFocus(onClose: () => void) {
+  const closeRef = useRef(onClose);
+  const triggerRef = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    if (!dialog) return;
+    const trigger = triggerRef.current;
+    const background = Array.from(document.querySelectorAll<HTMLElement>('.reading-club > .sidebar, .reading-club > .main-shell, .reading-club > .mobile-nav'));
+    const previousInert = background.map((element) => element.inert);
+    background.forEach((element) => { element.inert = true; });
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex="0"]')).filter((element) => element.getClientRects().length > 0);
+    if (!dialog.contains(document.activeElement)) focusable()[0]?.focus();
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); closeRef.current(); }
+      if (event.key !== 'Tab') return;
+      const targets = focusable();
+      const first = targets[0];
+      const last = targets[targets.length - 1];
+      if (!first) { event.preventDefault(); return; }
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', keydown);
+    return () => {
+      document.removeEventListener('keydown', keydown);
+      background.forEach((element, index) => { element.inert = previousInert[index]; });
+      document.body.style.overflow = previousOverflow;
+      if (trigger && !dialog.contains(trigger)) trigger.focus();
+    };
+  }, []);
+}
+
 function AskSpool({ library, onClose }: { library: LibraryPayload; onClose: () => void }) {
+  useModalFocus(onClose);
   const [question, setQuestion] = useState("");
   const [result, setResult] = useState<LocalAskResult | null>(null);
   const [searched, setSearched] = useState(false);
@@ -2016,12 +2107,6 @@ function AskSpool({ library, onClose }: { library: LibraryPayload; onClose: () =
   const [status, setStatus] = useState<"idle" | "thinking" | "cached" | "ready" | "error">("idle");
   const [error, setError] = useState("");
   const suggestions = ["How should I build a small AI team?", "What hooks and content patterns have I saved?", "Turn my career saves into a practical plan."];
-
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
 
   const runFreeSearch = (nextQuestion = question) => {
     const trimmed = nextQuestion.trim();
@@ -2085,6 +2170,7 @@ function AskSpool({ library, onClose }: { library: LibraryPayload; onClose: () =
 }
 
 function CaptureModal({ onClose, onCaptured }: { onClose: () => void; onCaptured: (capture: ApiCapture) => void }) {
+  useModalFocus(onClose);
   const [url, setUrl] = useState("");
   const [sharedText, setSharedText] = useState("");
   const [saving, setSaving] = useState(false);
@@ -2126,10 +2212,10 @@ function CaptureModal({ onClose, onCaptured }: { onClose: () => void; onCaptured
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="capture-modal" role="dialog" aria-modal="true" aria-labelledby="capture-title" onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal-header">
-          <div><span className="eyebrow"><Link2 size={13} /> Desktop test</span><h2 id="capture-title">Spool a link</h2></div>
+          <div><span className="eyebrow"><Link2 size={13} /> Keep something good</span><h2 id="capture-title">Add a link</h2></div>
           <button className="icon-button" aria-label="Close" onClick={onClose}><X size={18} /></button>
         </div>
-        <p>On iPhone this arrives automatically from the Share Sheet. Paste once here to test the same pipeline.</p>
+        <p>Paste a link and choose what you want to keep. On iPhone, you can also use your Save to Spool shortcut.</p>
         <label className={`capture-input ${error ? "has-error" : ""}`}>
           <span>Reel, post, profile, or video URL</span>
           <input autoFocus value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://www.instagram.com/reel/…" onKeyDown={(event) => { if (event.key === "Enter") void capture(); }} />
@@ -2156,7 +2242,7 @@ function CaptureModal({ onClose, onCaptured }: { onClose: () => void; onCaptured
             {!intents.length ? <><Bookmark size={13} /><span><strong>Save only</strong> · no Claude or transcript cost.</span></> : intents.includes("script") ? <><AudioLines size={13} /><span><strong>Script selected</strong> · always transcribes, then Claude organizes it.</span></> : intents.includes("knowledge") ? <><Sparkles size={13} /><span><strong>Caption first</strong> · Spool only transcribes when the lesson is missing.</span></> : <><UserRound size={13} /><span><strong>Creator playbook</strong> · studies verified style signals without forcing a transcript.</span></>}
           </p>
         </fieldset>
-        {error ? <span className="field-error">{error}</span> : null}
+        {error ? <span className="field-error" role="alert">{error}</span> : null}
         <div className="modal-footer">
           <span><Sparkles size={14} /> Your note adds context; labels decide the route</span>
           <button className="primary-button" disabled={saving} onClick={() => void capture()}>{saving ? "Spooling…" : intents.length ? "Spool it" : "Save only"}</button>
@@ -2167,6 +2253,7 @@ function CaptureModal({ onClose, onCaptured }: { onClose: () => void; onCaptured
 }
 
 function ContextModal({ capture, onClose, onSave }: { capture: ApiCapture; onClose: () => void; onSave: (text: string) => Promise<void> }) {
+  useModalFocus(onClose);
   const [text, setText] = useState(capture.sharedText || "");
   const [saving, setSaving] = useState(false);
   return (
@@ -2195,7 +2282,7 @@ function MobileNav({ active, onNavigate }: { active: View; onNavigate: (view: Vi
     <nav className="mobile-nav" aria-label="Mobile navigation">
       {navItems.filter((item) => item.id !== "setup").map((item) => {
         const Icon = item.icon;
-        return <button key={item.id} onClick={() => onNavigate(item.id)} className={active === item.id ? "active" : ""}><Icon size={19} /><span>{item.label}</span></button>;
+        return <button key={item.id} onClick={() => onNavigate(item.id)} aria-current={active === item.id ? "page" : undefined} className={active === item.id ? "active" : ""}><Icon size={19} /><span>{item.id === "scripts" ? "Banks" : item.id === "map" ? "Map" : item.label}</span></button>;
       })}
     </nav>
   );
@@ -2213,6 +2300,10 @@ export default function App() {
   const [libraryError, setLibraryError] = useState("");
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [checkingHealth, setCheckingHealth] = useState(false);
+  const [categoryId, setCategoryId] = useState<string | undefined>();
+  const navigate = (view: View) => { setActive(view); setCategoryId(undefined); window.scrollTo({ top: 0 }); };
+  const openCategory = (id: string) => { setCategoryId(id); setActive("threads"); window.scrollTo({ top: 0 }); };
+  const reviewRecovery = () => { setRecoveryOpen(true); setActive("setup"); window.scrollTo({ top: 0 }); };
 
   const refreshLibrary = async () => {
     try {
@@ -2345,13 +2436,14 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell">
-      <Sidebar active={active} onNavigate={setActive} onCapture={() => setCaptureOpen(true)} liveThreadCount={library.categories.length} liveScriptCount={library.captures.filter((capture) => capture.transcript?.trim() && capture.transcriptStatus === "ready").length} liveCreatorCount={Math.max(0, library.creators.length - library.creators.filter((live) => creators.some((seed) => seed.handle === live.creator)).length)} />
-      <main className="main-shell">
-        <Header active={active} onCapture={() => setCaptureOpen(true)} onAsk={() => setAskOpen(true)} />
+    <div className={`app-shell reading-club ${active === "map" ? "club-map-active" : ""}`}>
+      <a className="club-skip" href="#spool-content">Skip to content</a>
+      <Sidebar active={active} onNavigate={navigate} />
+      <main className="main-shell" id="spool-content" tabIndex={-1}>
+        <Header active={active} onCapture={() => setCaptureOpen(true)} onAsk={() => setAskOpen(true)} onSettings={() => navigate("setup")} />
         <div className="mobile-brand"><SpoolMark /><span>spool</span><div><button aria-label="Ask Spool" onClick={() => setAskOpen(true)}><Sparkles size={17} /></button><button aria-label="Open iPhone capture setup" onClick={() => setActive("setup")}><Menu size={19} /></button></div></div>
         {libraryError ? <div className="service-notice" role="alert"><p>{libraryError}</p><button onClick={() => void refreshLibrary()}>Try loading again</button></div> : !libraryLoaded ? <div className="service-notice" role="status">Loading your saved library…</div> : null}
-        {libraryLoaded && blockedSaves.length && (active === "briefing" || active === "setup") ? <section className="service-notice" aria-label="Processing status">
+        {libraryLoaded && blockedSaves.length && active === "setup" ? <section className="service-notice" aria-label="Processing status">
           <div><strong>{backupReady ? "Backup ready · recover a saved Reel" : transcriptAccount?.status === "exhausted" ? "Transcript credits used up" : transcriptAccount?.status === "invalid" ? "Supadata connection needs attention" : `${blockedSaves.length} saves need attention`}</strong>
             <p>{backupReady ? `Apify can transcribe Instagram Reels when Supadata is unavailable. $${health?.transcriptionFallback?.remainingCreditsUsd?.toFixed(2)} of free allowance remains. Choose an affected save below and retry it.` : transcriptAccount?.status === "exhausted" ? `${transcriptAccount.usedCredits} of ${transcriptAccount.maxCredits} Supadata credits used. No verified backup allowance is available; recheck the connection or wait for a reset.` : transcriptAccount?.status === "invalid" ? "Supadata rejected the configured key. Update it in Vercel or connect the Apify backup." : limitCount ? `${limitCount} saves hit a transcript limit. Recheck the connections before retrying.` : "Some sources need more context or an analysis retry."} Your links and existing notes are safe.</p>
             <div className="service-actions"><button onClick={() => setRecoveryOpen((open) => !open)} aria-expanded={recoveryOpen}>{recoveryOpen ? "Hide affected saves" : `Review affected saves (${blockedSaves.length})`}</button><button disabled={checkingHealth} onClick={() => void refreshHealth()}>{checkingHealth ? "Checking…" : "Recheck connection"}</button><a href="https://dash.supadata.ai" target="_blank" rel="noreferrer">Check Supadata <ExternalLink size={12} /></a>{health?.transcriptionFallback?.status !== "missing" ? <a href="https://console.apify.com" target="_blank" rel="noreferrer">Check Apify <ExternalLink size={12} /></a> : null}</div>
@@ -2359,19 +2451,22 @@ export default function App() {
           </div>
           {recoveryOpen ? <BriefingSourceIndex captures={blockedSaves} onRetry={retryCapture} onAddContext={setContextCapture} onTranscribe={transcribeCapture} /> : null}
         </section> : null}
+        <div className={active === "map" ? "club-map-content" : "club-content"}>
         {libraryLoaded ? <>
-        {active === "briefing" ? <Briefing onNavigate={setActive} onOpenThread={openThread} library={library} onRetry={retryCapture} onAddContext={setContextCapture} onTranscribe={transcribeCapture} /> : null}
-        {active === "threads" ? <ThreadsView library={library} onTranscribe={transcribeCapture} /> : null}
+        {active === "briefing" ? <ReadingHome onNavigate={navigate} onOpenCategory={openCategory} onRecover={reviewRecovery} blockedCount={blockedSaves.length} library={library} onRetry={retryCapture} onAddContext={setContextCapture} onTranscribe={transcribeCapture} /> : null}
+        {active === "threads" ? <ThreadsView library={library} onTranscribe={transcribeCapture} categoryId={categoryId} onCloseCategory={() => setCategoryId(undefined)} onMap={() => navigate("map")} /> : null}
+        {active === "map" ? <div className="second-brain-page mode-map"><KnowledgeMapView library={library} onTranscribe={transcribeCapture} /></div> : null}
         {active === "scripts" ? <ScriptBankView library={library} /> : null}
         {active === "creators" ? <CreatorsView library={library} /> : null}
         {active === "setup" ? <SetupView onCapture={() => setCaptureOpen(true)} health={health} /> : null}
         </> : null}
+        </div>
       </main>
-      <MobileNav active={active} onNavigate={setActive} />
+      <MobileNav active={active} onNavigate={navigate} />
       {askOpen ? <AskSpool library={library} onClose={() => setAskOpen(false)} /> : null}
       {captureOpen ? <CaptureModal onClose={() => setCaptureOpen(false)} onCaptured={handleCaptured} /> : null}
       {contextCapture ? <ContextModal capture={contextCapture} onClose={() => setContextCapture(null)} onSave={addContext} /> : null}
-      {toast ? <div className="toast"><Check size={16} /><span>{toast}</span>{readyCount ? <small>{readyCount} ready</small> : null}</div> : null}
+      <div role="status" aria-live="polite">{toast ? <div className="toast"><Check size={16} /><span>{toast}</span>{readyCount ? <small>{readyCount} ready</small> : null}</div> : null}</div>
     </div>
   );
 }
