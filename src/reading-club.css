@@ -276,7 +276,7 @@ body:has(.reading-club:not(.club-map-active)) { min-width: 0; }
   .club-discover nav button > span:nth-child(2) { font-size: 12px; }
   .club-hook-section { margin-top: 25px; }
   .club-attention { margin-top: 25px; }
-  .reading-club .mobile-nav { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; height: auto; min-height: 68px; padding: 7px 6px calc(7px + env(safe-area-inset-bottom)); background: #fffdf3; border-top: 1px solid #e5dfcb; backdrop-filter: none; }
+  .reading-club .mobile-nav { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; height: auto; min-height: 68px; padding: 7px 6px calc(7px + env(safe-area-inset-bottom)); background: #fffdf3; border-top: 1px solid #e5dfcb; backdrop-filter: none; }
   .reading-club .mobile-nav button { min-height: 50px; min-width: 0; font-size: 10px; gap: 5px; border-radius: 10px; }
   .reading-club .mobile-nav button.active { color: #18232f; background: #faedb7; }
   .club-content .page, .club-content .second-brain-page { padding: 28px 18px 100px; }

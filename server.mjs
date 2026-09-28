@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 import { findCapture, readCaptures, storageMode, upsertCapture, transcriptJobs } from "./lib/storage.mjs";
 import { safeText, transcriptFailure, canAutoRetryAnalysis, createTranscriptAccountReader, supadataErrorMessage } from "./lib/processing.mjs";
 import { createApifyClient, instagramReelUrl, apifyUnavailableMessage } from "./lib/apify.mjs";
+import { createStudioStore } from "./lib/studio-storage.mjs";
+import { createStudioService, StudioError } from "./lib/studio.mjs";
+import { generateStudio } from "./lib/studio-ai.mjs";
+
+const contentStudio = createStudioService({ store: createStudioStore(), readLibrary: async () => buildLibrary(await readCaptures()), generate: generateStudio, limit: process.env.SPOOL_STUDIO_DAILY_LIMIT });
 
 const readTranscriptAccount = createTranscriptAccountReader();
 const apify = createApifyClient();
@@ -1237,6 +1242,20 @@ export function buildLibrary(captures) {
 export async function handleApi(req, res, pathname, schedule = (work) => void work) {
   const origin = requestOrigin(req);
   if (req.method === "OPTIONS") return json(res, 204, {});
+  if (pathname === "/api/studio" || pathname.startsWith("/api/studio/")) {
+    try {
+      if (!captureAuthorized(req)) return json(res, 401, { protected: true, error: "Enter your Spool access token to open Studio. This is not your Claude API key." });
+      if (pathname === "/api/studio" && req.method === "GET") return json(res, 200, { ...await contentStudio.list(), protected: Boolean(process.env.SPOOL_CAPTURE_TOKEN) });
+      const actions = { "/api/studio/keep": "keep", "/api/studio/brief": "brief", "/api/studio/edit": "edit", "/api/studio/generate": "run" };
+      if (req.method === "POST" && actions[pathname]) {
+        const body = await readBody(req);
+        if (!body || typeof body !== "object" || Array.isArray(body)) throw new StudioError(400, "Send a valid Studio request.");
+        const result = await contentStudio[actions[pathname]](body);
+        return json(res, result.status === "pending" ? 202 : 200, result);
+      }
+      return json(res, 404, { error: "Studio action not found." });
+    } catch (error) { return json(res, error instanceof StudioError ? error.status : 503, { error: error instanceof StudioError ? error.message : "Studio could not load or save your work. Check the database connection, then try again. No automatic AI retry was made." }); }
+  }
   if (pathname === "/api/health" && req.method === "GET") {
     const captures = await readCaptures();
     const latestAnthropic = captures.find((capture) => capture.provider === "anthropic" || capture.error);

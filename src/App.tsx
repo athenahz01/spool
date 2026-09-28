@@ -34,8 +34,9 @@ import {
 } from "lucide-react";
 import { House, FolderOpen, Cpu, Clapperboard, BriefcaseBusiness, Rocket, Heart, Network } from "lucide-react";
 import { creators, navCounts, sources, type Source } from "./data";
+import ContentStudio from "./ContentStudio";
 
-type View = "briefing" | "threads" | "scripts" | "creators" | "setup" | "map";
+type View = "briefing" | "threads" | "scripts" | "creators" | "setup" | "map" | "studio";
 type CaptureIntent = "knowledge" | "script" | "creator";
 type ApiCapture = {
   id: string;
@@ -289,6 +290,7 @@ function captureStatusCopy(capture: ApiCapture) {
 const navItems: Array<{ id: View; label: string; icon: typeof Compass; count?: number }> = [
   { id: "briefing", label: "Home", icon: House },
   { id: "threads", label: "Library", icon: FolderOpen },
+  { id: "studio", label: "Content Studio", icon: Feather },
   { id: "scripts", label: "Hook & script bank", icon: FileText },
   { id: "creators", label: "Creators", icon: UsersRound, count: navCounts.creators },
   { id: "map", label: "Brain map", icon: Network },
@@ -349,6 +351,7 @@ function Header({ active, onCapture, onAsk, onSettings }: { active: View; onCapt
   const titles: Record<View, string> = {
     briefing: "Home",
     threads: "Library",
+    studio: "Content Studio",
     scripts: "Hook & script banks",
     creators: "Creator notes",
     setup: "Capture and settings",
@@ -2282,7 +2285,7 @@ function MobileNav({ active, onNavigate }: { active: View; onNavigate: (view: Vi
     <nav className="mobile-nav" aria-label="Mobile navigation">
       {navItems.filter((item) => item.id !== "setup").map((item) => {
         const Icon = item.icon;
-        return <button key={item.id} onClick={() => onNavigate(item.id)} aria-current={active === item.id ? "page" : undefined} className={active === item.id ? "active" : ""}><Icon size={19} /><span>{item.id === "scripts" ? "Banks" : item.id === "map" ? "Map" : item.label}</span></button>;
+        return <button key={item.id} onClick={() => onNavigate(item.id)} aria-current={active === item.id ? "page" : undefined} className={active === item.id ? "active" : ""}><Icon size={19} /><span>{item.id === "scripts" ? "Banks" : item.id === "map" ? "Map" : item.id === "studio" ? "Studio" : item.label}</span></button>;
       })}
     </nav>
   );
@@ -2457,6 +2460,7 @@ export default function App() {
         {active === "threads" ? <ThreadsView library={library} onTranscribe={transcribeCapture} categoryId={categoryId} onCloseCategory={() => setCategoryId(undefined)} onMap={() => navigate("map")} /> : null}
         {active === "map" ? <div className="second-brain-page mode-map"><KnowledgeMapView library={library} onTranscribe={transcribeCapture} /></div> : null}
         {active === "scripts" ? <ScriptBankView library={library} /> : null}
+        {active === "studio" ? <ContentStudio /> : null}
         {active === "creators" ? <CreatorsView library={library} /> : null}
         {active === "setup" ? <SetupView onCapture={() => setCaptureOpen(true)} health={health} /> : null}
         </> : null}

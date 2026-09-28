@@ -10,5 +10,7 @@ npm-debug.log*
 vite.config.js
 vite.config.d.ts
 data/captures.json
+data/studio.json
+data/studio.json.*.tmp
 .agents/
 skills-lock.json
